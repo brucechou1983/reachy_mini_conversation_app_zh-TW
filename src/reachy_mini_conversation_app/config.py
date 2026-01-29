@@ -61,17 +61,16 @@ class Config:
         """Initialize the configuration."""
         profile = self.REACHY_MINI_CUSTOM_PROFILE
         if profile:
-            # check if the profile prompt custom doesn't shadow a default library prompt
+            # check if the custom profile doesn't shadow a default library profile
             profile_dir = self.PROFILES_DIRECTORY / profile
             shadowed_profile = DEFAULT_PROFILES_DIRECTORY / profile
             if profile_dir is not shadowed_profile and shadowed_profile.exists():
-                logger.error(f"Ambiguous profile '{profile}': found in both {config.PROFILES_DIRECTORY} and reachy_mini_conversation_app default profiles library.\n"
-                f"Please rename the profile '{profile}' in {config.PROFILES_DIRECTORY} to avoid confusion "
+                raise RuntimeError(f"Config.__init__(): Ambiguous profile '{profile}': found in both {self.PROFILES_DIRECTORY} and reachy_mini_conversation_app default profiles library. "
+                f"Please rename the profile '{profile}' in {self.PROFILES_DIRECTORY} to avoid confusion "
                 "or unset 'REACHY_MINI_CUSTOM_PROFILE' env variable to use the default library profile voice.")
-                sys.exit(1)
 
         if self.PROFILES_DIRECTORY is not DEFAULT_PROFILES_DIRECTORY:
-            logger.info(f"PROFILES_DIRECTORY is set. Profiles (instructions.txt, tools.txt, voice.txt) will be loaded from {self.PROFILES_DIRECTORY}.")
+            logger.warning(f"Environment variable 'PROFILES_DIRECTORY' is set. Profiles (instructions.txt, tools.txt, voice.txt) will be loaded from {self.PROFILES_DIRECTORY}.")
 
 
 config = Config()
