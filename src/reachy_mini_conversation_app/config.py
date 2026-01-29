@@ -9,12 +9,13 @@ from dotenv import find_dotenv, load_dotenv
 # Locked profile: set to a profile name (e.g., "astronomer") to lock the app
 # to that profile and disable all profile switching. Leave as None for normal behavior.
 LOCKED_PROFILE: str | None = None
+DEFAULT_PROFILES_DIRECTORY = Path(__file__).parent / "profiles"
 
 logger = logging.getLogger(__name__)
 
 # Validate LOCKED_PROFILE at startup
 if LOCKED_PROFILE is not None:
-    _profiles_dir = Path(__file__).parent / "profiles"
+    _profiles_dir = DEFAULT_PROFILES_DIRECTORY
     _profile_path = _profiles_dir / LOCKED_PROFILE
     _instructions_file = _profile_path / "instructions.txt"
     if not _profile_path.is_dir():
@@ -54,6 +55,23 @@ class Config:
     REACHY_MINI_CUSTOM_PROFILE = LOCKED_PROFILE or os.getenv("REACHY_MINI_CUSTOM_PROFILE")
 
     logger.debug(f"Custom Profile: {REACHY_MINI_CUSTOM_PROFILE}")
+
+
+    def __init__(self) -> None:
+        """Initialize the configuration."""
+        profile = self.REACHY_MINI_CUSTOM_PROFILE
+        if profile:
+            # check if the profile prompt custom doesn't shadow a default library prompt
+            profile_dir = self.PROFILES_DIRECTORY / profile
+            shadowed_profile = DEFAULT_PROFILES_DIRECTORY / profile
+            if profile_dir is not shadowed_profile and shadowed_profile.exists():
+                logger.error(f"Ambiguous profile '{profile}': found in both {config.PROFILES_DIRECTORY} and reachy_mini_conversation_app default profiles library.\n"
+                f"Please rename the profile '{profile}' in {config.PROFILES_DIRECTORY} to avoid confusion "
+                "or unset 'REACHY_MINI_CUSTOM_PROFILE' env variable to use the default library profile voice.")
+                sys.exit(1)
+
+        if self.PROFILES_DIRECTORY is not DEFAULT_PROFILES_DIRECTORY:
+            logger.info(f"PROFILES_DIRECTORY is set. Profiles (instructions.txt, tools.txt, voice.txt) will be loaded from {self.PROFILES_DIRECTORY}.")
 
 
 config = Config()
