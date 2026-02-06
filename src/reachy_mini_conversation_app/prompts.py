@@ -3,7 +3,7 @@ import sys
 import logging
 from pathlib import Path
 
-from reachy_mini_conversation_app.config import config
+from reachy_mini_conversation_app.config import DEFAULT_PROFILES_DIRECTORY, config
 
 
 logger = logging.getLogger(__name__)
@@ -65,7 +65,14 @@ def get_session_instructions() -> str:
         logger.info(f"Loading default prompt from {PROMPTS_LIBRARY_DIRECTORY / 'default_prompt.txt'}")
         instructions_file = PROMPTS_LIBRARY_DIRECTORY / "default_prompt.txt"
     else:
-        logger.info(f"Loading prompt from profile '{profile}'")
+        if config.PROFILES_DIRECTORY != DEFAULT_PROFILES_DIRECTORY:
+            logger.info(
+                "Loading prompt from external profile '%s' (root=%s)",
+                profile,
+                config.PROFILES_DIRECTORY,
+            )
+        else:
+            logger.info(f"Loading prompt from profile '{profile}'")
         instructions_file = config.PROFILES_DIRECTORY / profile / INSTRUCTIONS_FILENAME
 
     try:
