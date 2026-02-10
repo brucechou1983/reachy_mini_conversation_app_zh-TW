@@ -69,7 +69,7 @@ class McpToolWrapper:
 
         # Convert list[Content] → dict
         parts: List[str] = []
-        for item in result:
+        for item in result.content:
             text = getattr(item, "text", None)
             if text is not None:
                 parts.append(text)
