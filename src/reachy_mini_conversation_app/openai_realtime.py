@@ -18,6 +18,7 @@ from websockets.exceptions import ConnectionClosedError
 
 from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.prompts import get_session_voice, get_session_instructions
+from reachy_mini_conversation_app.mcp_client import shutdown_mcp, register_mcp_tools
 from reachy_mini_conversation_app.tools.core_tools import (
     ToolDependencies,
     get_tool_specs,
@@ -232,6 +233,12 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
     async def _run_realtime_session(self) -> None:
         """Establish and manage a single realtime session."""
         async with self.client.realtime.connect(model=config.MODEL_NAME) as conn:
+            # Register MCP tools (if configured) before sending tool specs to OpenAI
+            try:
+                await register_mcp_tools()
+            except Exception as e:
+                logger.warning("MCP tool registration failed (continuing with local tools): %s", e)
+
             try:
                 await conn.session.update(
                     session={
@@ -537,6 +544,12 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                 await self.partial_transcript_task
             except asyncio.CancelledError:
                 pass
+
+        # Disconnect MCP clients
+        try:
+            await shutdown_mcp()
+        except Exception as e:
+            logger.debug("MCP shutdown error: %s", e)
 
         if self.connection:
             try:

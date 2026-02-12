@@ -31,6 +31,12 @@ def parse_args() -> Tuple[argparse.Namespace, list]:  # type: ignore
         default=None,
         help="[Optional] Robot name/prefix for Zenoh topics (must match daemon's --robot-name). Only needed for development with multiple robots.",
     )
+    parser.add_argument(
+        "--mcp-servers",
+        type=str,
+        default=None,
+        help="Comma-separated MCP server URLs (overrides MCP_SERVER_URLS env var)",
+    )
     return parser.parse_known_args()
 
 
