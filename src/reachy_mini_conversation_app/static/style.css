@@ -69,6 +69,17 @@ body {
 .hero {
   margin-bottom: 24px;
 }
+.back-link {
+  display: inline-block;
+  margin-bottom: 12px;
+  color: var(--muted);
+  font-size: 13px;
+  text-decoration: none;
+  transition: color 0.2s;
+}
+.back-link:hover {
+  color: var(--accent);
+}
 .hero h1 {
   margin: 6px 0 6px;
   font-size: 32px;

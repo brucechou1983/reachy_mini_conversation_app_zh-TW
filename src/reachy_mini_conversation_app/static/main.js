@@ -289,6 +289,20 @@ async function init() {
 
   show(tavilyPanel, true);
 
+  // Check if Tavily key is already configured
+  try {
+    const tavilyResp = await fetchWithTimeout("/tavily_status", {}, 2000);
+    if (tavilyResp.ok) {
+      const tavilyData = await tavilyResp.json();
+      if (tavilyData.has_key) {
+        tavilyChip.textContent = "Configured";
+        tavilyChip.className = "chip chip-ok";
+        tavilyStatus.textContent = "Tavily API key is set. web_search tool is enabled.";
+        tavilyStatus.className = "status ok";
+      }
+    }
+  } catch (e) {}
+
   tavilySaveBtn.addEventListener("click", async () => {
     const key = tavilyKey.value.trim();
     if (!key) {

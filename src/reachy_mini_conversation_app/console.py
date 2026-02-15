@@ -342,6 +342,12 @@ class LocalStream:
                 logger.warning(f"API key validation failed: {e}")
                 return JSONResponse({"valid": False, "error": "validation_error"}, status_code=500)
 
+        # GET /tavily_status -> whether Tavily key is set
+        @self._settings_app.get("/tavily_status")
+        def _tavily_status() -> JSONResponse:
+            has_key = bool(config.TAVILY_API_KEY and str(config.TAVILY_API_KEY).strip())
+            return JSONResponse({"has_key": has_key})
+
         # POST /tavily_api_key -> set/persist Tavily key
         class TavilyKeyPayload(BaseModel):
             key: str
@@ -415,15 +421,15 @@ class LocalStream:
         self._init_settings_ui_if_needed()
         if self._settings_app is not None:
             logger.info("Settings page available at http://localhost:7860/")
+
+        # If key is still missing -> open settings page and wait
+        if not (config.OPENAI_API_KEY and str(config.OPENAI_API_KEY).strip()):
+            logger.warning("OPENAI_API_KEY not found. Open http://localhost:7860/ to enter it.")
             try:
                 import webbrowser
                 webbrowser.open("http://localhost:7860/")
             except Exception:
                 pass
-
-        # If key is still missing -> wait until provided via the settings UI
-        if not (config.OPENAI_API_KEY and str(config.OPENAI_API_KEY).strip()):
-            logger.warning("OPENAI_API_KEY not found. Open http://localhost:7860/ to enter it.")
             # Poll until the key becomes available (set via the settings UI)
             try:
                 while not (config.OPENAI_API_KEY and str(config.OPENAI_API_KEY).strip()):
