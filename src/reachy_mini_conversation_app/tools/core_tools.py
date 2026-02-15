@@ -29,6 +29,7 @@ if not logger.handlers:
 
 ALL_TOOLS: Dict[str, "Tool"] = {}
 ALL_TOOL_SPECS: List[Dict[str, Any]] = []
+_ALL_TOOL_INSTANCES: Dict[str, "Tool"] = {}  # includes unavailable tools
 _TOOLS_INITIALIZED = False
 
 
@@ -79,6 +80,14 @@ class Tool(abc.ABC):
             "description": self.description,
             "parameters": self.parameters_schema,
         }
+
+    def is_available(self) -> bool:
+        """Return True if this tool should be exposed to the LLM.
+
+        Override in subclasses that require external configuration (e.g. an
+        API key) to gate availability at runtime.
+        """
+        return True
 
     @abc.abstractmethod
     async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
@@ -173,7 +182,7 @@ def _load_profile_tools() -> None:
 
 def _initialize_tools() -> None:
     """Populate registry once, even if module is imported repeatedly."""
-    global ALL_TOOLS, ALL_TOOL_SPECS, _TOOLS_INITIALIZED
+    global ALL_TOOLS, ALL_TOOL_SPECS, _ALL_TOOL_INSTANCES, _TOOLS_INITIALIZED
 
     if _TOOLS_INITIALIZED:
         logger.debug("Tools already initialized; skipping reinitialization.")
@@ -181,11 +190,15 @@ def _initialize_tools() -> None:
 
     _load_profile_tools()
 
-    ALL_TOOLS = {cls.name: cls() for cls in get_concrete_subclasses(Tool)}  # type: ignore[type-abstract]
+    _ALL_TOOL_INSTANCES = {cls.name: cls() for cls in get_concrete_subclasses(Tool)}  # type: ignore[type-abstract]
+    ALL_TOOLS = {name: t for name, t in _ALL_TOOL_INSTANCES.items() if t.is_available()}
     ALL_TOOL_SPECS = [tool.spec() for tool in ALL_TOOLS.values()]
 
-    for tool_name, tool in ALL_TOOLS.items():
-        logger.info(f"tool registered: {tool_name} - {tool.description}")
+    for name, t in _ALL_TOOL_INSTANCES.items():
+        if t.is_available():
+            logger.info(f"tool registered: {name} - {t.description}")
+        else:
+            logger.info(f"tool skipped (unavailable): {name}")
 
     _TOOLS_INITIALIZED = True
 
@@ -194,8 +207,17 @@ _initialize_tools()
 
 
 def get_tool_specs(exclusion_list: list[str] = []) -> list[Dict[str, Any]]:
-    """Get tool specs, optionally excluding some tools."""
-    return [spec for spec in ALL_TOOL_SPECS if spec.get("name") not in exclusion_list]
+    """Get tool specs, dynamically checking availability.
+
+    Tools whose ``is_available()`` returns ``False`` at call time are excluded,
+    allowing runtime configuration (e.g. setting an API key) to enable tools
+    without restarting the process.
+    """
+    return [
+        t.spec()
+        for t in _ALL_TOOL_INSTANCES.values()
+        if t.is_available() and t.name not in exclusion_list
+    ]
 
 
 # Dispatcher
@@ -210,7 +232,7 @@ def _safe_load_obj(args_json: str) -> Dict[str, Any]:
 
 async def dispatch_tool_call(tool_name: str, args_json: str, deps: ToolDependencies) -> Dict[str, Any]:
     """Dispatch a tool call by name with JSON args and dependencies."""
-    tool = ALL_TOOLS.get(tool_name)
+    tool = _ALL_TOOL_INSTANCES.get(tool_name)
 
     if not tool:
         return {"error": f"unknown tool: {tool_name}"}

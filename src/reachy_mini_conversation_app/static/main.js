@@ -280,6 +280,47 @@ async function init() {
     return;
   }
 
+  // --- Tavily panel ---
+  const tavilyPanel = document.getElementById("tavily-panel");
+  const tavilyChip = document.getElementById("tavily-chip");
+  const tavilyKey = document.getElementById("tavily-key");
+  const tavilySaveBtn = document.getElementById("tavily-save-btn");
+  const tavilyStatus = document.getElementById("tavily-status");
+
+  show(tavilyPanel, true);
+
+  tavilySaveBtn.addEventListener("click", async () => {
+    const key = tavilyKey.value.trim();
+    if (!key) {
+      tavilyStatus.textContent = "Please enter a key.";
+      tavilyStatus.className = "status warn";
+      return;
+    }
+    tavilyStatus.textContent = "Saving...";
+    tavilyStatus.className = "status";
+    try {
+      const resp = await fetch("/tavily_api_key", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (resp.ok && data.ok) {
+        tavilyStatus.textContent = "Saved. web_search tool will be available on next session.";
+        tavilyStatus.className = "status ok";
+        tavilyChip.textContent = "Configured";
+        tavilyChip.className = "chip chip-ok";
+        tavilyKey.value = "";
+      } else {
+        tavilyStatus.textContent = data.error || "Failed to save.";
+        tavilyStatus.className = "status error";
+      }
+    } catch (e) {
+      tavilyStatus.textContent = "Failed to save key.";
+      tavilyStatus.className = "status error";
+    }
+  });
+
   // Wait until backend routes are ready before rendering personalities UI
   const list = (await waitForPersonalityData()) || { choices: [] };
   statusEl.textContent = "";

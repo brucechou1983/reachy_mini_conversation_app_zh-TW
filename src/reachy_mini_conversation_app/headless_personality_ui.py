@@ -33,6 +33,7 @@ def mount_personality_routes(
     *,
     persist_personality: Callable[[Optional[str]], None] | None = None,
     get_persisted_personality: Callable[[], Optional[str]] | None = None,
+    persist_tavily_key: Callable[[str], None] | None = None,
 ) -> None:
     """Register personality management endpoints on a FastAPI app."""
     try:
@@ -256,6 +257,31 @@ def mount_personality_routes(
             return {"ok": True, "status": status, "startup": persisted_choice}
         except Exception as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=500)  # type: ignore
+
+    class TavilyKeyPayload(BaseModel):
+        key: str
+
+    @app.post("/tavily_api_key")
+    async def _set_tavily_key(payload: TavilyKeyPayload) -> dict:  # type: ignore
+        key = (payload.key or "").strip()
+        if not key:
+            return JSONResponse({"ok": False, "error": "empty_key"}, status_code=400)  # type: ignore
+        if persist_tavily_key is not None:
+            try:
+                persist_tavily_key(key)
+            except Exception as e:
+                logger.warning("Failed to persist Tavily key: %s", e)
+                return JSONResponse({"ok": False, "error": str(e)}, status_code=500)  # type: ignore
+        else:
+            # Fallback: at least set in-memory
+            try:
+                import os as _os
+
+                _os.environ["TAVILY_API_KEY"] = key
+                config.TAVILY_API_KEY = key
+            except Exception:
+                pass
+        return {"ok": True}
 
     @app.get("/voices")
     async def _voices() -> list[str]:

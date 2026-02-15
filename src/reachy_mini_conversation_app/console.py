@@ -160,6 +160,47 @@ class LocalStream:
         except Exception as e:
             logger.warning("Failed to persist OPENAI_API_KEY: %s", e)
 
+    def _persist_tavily_key(self, key: str) -> None:
+        """Persist Tavily API key to environment and instance ``.env`` if possible."""
+        k = (key or "").strip()
+        if not k:
+            return
+        try:
+            os.environ["TAVILY_API_KEY"] = k
+        except Exception:
+            pass
+        try:
+            config.TAVILY_API_KEY = k
+        except Exception:
+            pass
+
+        if not self._instance_path:
+            return
+        try:
+            inst = Path(self._instance_path)
+            env_path = inst / ".env"
+            lines = self._read_env_lines(env_path)
+            replaced = False
+            for i, ln in enumerate(lines):
+                if ln.strip().startswith("TAVILY_API_KEY="):
+                    lines[i] = f"TAVILY_API_KEY={k}"
+                    replaced = True
+                    break
+            if not replaced:
+                lines.append(f"TAVILY_API_KEY={k}")
+            final_text = "\n".join(lines) + "\n"
+            env_path.write_text(final_text, encoding="utf-8")
+            logger.info("Persisted TAVILY_API_KEY to %s", env_path)
+
+            try:
+                from dotenv import load_dotenv
+
+                load_dotenv(dotenv_path=str(env_path), override=True)
+            except Exception:
+                pass
+        except Exception as e:
+            logger.warning("Failed to persist TAVILY_API_KEY: %s", e)
+
     def _persist_personality(self, profile: Optional[str]) -> None:
         """Persist the startup personality to the instance .env and config."""
         selection = (profile or "").strip() or None
@@ -301,6 +342,18 @@ class LocalStream:
                 logger.warning(f"API key validation failed: {e}")
                 return JSONResponse({"valid": False, "error": "validation_error"}, status_code=500)
 
+        # POST /tavily_api_key -> set/persist Tavily key
+        class TavilyKeyPayload(BaseModel):
+            key: str
+
+        @self._settings_app.post("/tavily_api_key")
+        def _set_tavily_key(payload: TavilyKeyPayload) -> JSONResponse:
+            key = (payload.key or "").strip()
+            if not key:
+                return JSONResponse({"ok": False, "error": "empty_key"}, status_code=400)
+            self._persist_tavily_key(key)
+            return JSONResponse({"ok": True})
+
         self._settings_initialized = True
 
     def launch(self) -> None:
@@ -326,6 +379,12 @@ class LocalStream:
                     if new_key:
                         try:
                             config.OPENAI_API_KEY = new_key
+                        except Exception:
+                            pass
+                    new_tavily_key = os.getenv("TAVILY_API_KEY", "").strip()
+                    if new_tavily_key:
+                        try:
+                            config.TAVILY_API_KEY = new_tavily_key
                         except Exception:
                             pass
                     new_profile = os.getenv("REACHY_MINI_CUSTOM_PROFILE")
@@ -354,10 +413,17 @@ class LocalStream:
         # Always expose settings UI if a settings app is available
         # (do this AFTER loading/downloading the key so status endpoint sees the right value)
         self._init_settings_ui_if_needed()
+        if self._settings_app is not None:
+            logger.info("Settings page available at http://localhost:7860/")
+            try:
+                import webbrowser
+                webbrowser.open("http://localhost:7860/")
+            except Exception:
+                pass
 
         # If key is still missing -> wait until provided via the settings UI
         if not (config.OPENAI_API_KEY and str(config.OPENAI_API_KEY).strip()):
-            logger.warning("OPENAI_API_KEY not found. Open the app settings page to enter it.")
+            logger.warning("OPENAI_API_KEY not found. Open http://localhost:7860/ to enter it.")
             # Poll until the key becomes available (set via the settings UI)
             try:
                 while not (config.OPENAI_API_KEY and str(config.OPENAI_API_KEY).strip()):
@@ -384,6 +450,7 @@ class LocalStream:
                         lambda: self._asyncio_loop,
                         persist_personality=self._persist_personality,
                         get_persisted_personality=self._read_persisted_personality,
+                        persist_tavily_key=self._persist_tavily_key,
                     )
             except Exception:
                 pass

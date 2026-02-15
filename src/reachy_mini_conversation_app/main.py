@@ -136,6 +136,11 @@ def run(
             type="password",
             value=os.getenv("OPENAI_API_KEY") if not get_space() else "",
         )
+        tavily_key_textbox = gr.Textbox(
+            label="Tavily API Key (optional, enables web search)",
+            type="password",
+            value=os.getenv("TAVILY_API_KEY") or "",
+        )
 
         from reachy_mini_conversation_app.gradio_personality import PersonalityUI
 
@@ -149,6 +154,7 @@ def run(
             additional_inputs=[
                 chatbot,
                 api_key_textbox,
+                tavily_key_textbox,
                 *personality_ui.additional_inputs_ordered(),
             ],
             additional_outputs=[chatbot],
@@ -162,6 +168,25 @@ def run(
             app = settings_app
 
         personality_ui.wire_events(handler, stream_manager)
+
+        async def _on_tavily_key_change(key: str) -> None:
+            from reachy_mini_conversation_app.config import config as _cfg
+
+            k = (key or "").strip()
+            if k:
+                os.environ["TAVILY_API_KEY"] = k
+                _cfg.TAVILY_API_KEY = k
+            else:
+                os.environ.pop("TAVILY_API_KEY", None)
+                _cfg.TAVILY_API_KEY = None
+            await handler._restart_session()
+
+        with stream_manager:
+            tavily_key_textbox.change(
+                fn=_on_tavily_key_change,
+                inputs=[tavily_key_textbox],
+                outputs=[],
+            )
 
         app = gr.mount_gradio_app(app, stream.ui, path="/")
     else:

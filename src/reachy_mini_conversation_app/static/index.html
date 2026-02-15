@@ -48,6 +48,23 @@
         </div>
       </div>
 
+      <div id="tavily-panel" class="panel hidden">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Optional</p>
+            <h2>Web Search (Tavily)</h2>
+          </div>
+          <span id="tavily-chip" class="chip">Not set</span>
+        </div>
+        <p class="muted">Add a Tavily API key to enable the <code>web_search</code> tool. Get one free at <a href="https://tavily.com" target="_blank">tavily.com</a>.</p>
+        <label for="tavily-key">Tavily API Key</label>
+        <input id="tavily-key" type="password" placeholder="tvly-..." autocomplete="off" />
+        <div class="actions">
+          <button id="tavily-save-btn" class="ghost">Save key</button>
+          <p id="tavily-status" class="status"></p>
+        </div>
+      </div>
+
       <div id="personality-panel" class="panel hidden">
         <div class="panel-heading">
           <div>
