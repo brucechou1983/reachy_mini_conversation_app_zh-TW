@@ -23,6 +23,8 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
           git checkout --orphan hf-deploy
           git add -A
           git commit -m "Sync from GitHub (${{ github.sha }})"
