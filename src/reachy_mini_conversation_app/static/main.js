@@ -449,9 +449,9 @@ async function init() {
       // Available tools as checkboxes
       renderToolCheckboxes(data.available_tools, data.enabled_tools);
       attachToolHandlers();
-      // Default name field to last segment of selection
+      // Pre-fill name field from selection (last path segment, or profile name itself)
       const idx = selected.lastIndexOf("/");
-      pName.value = idx >= 0 ? selected.slice(idx + 1) : "";
+      pName.value = idx >= 0 ? selected.slice(idx + 1) : (selected === DEFAULT_OPTION ? "" : selected);
       pStatus.textContent = `Loaded ${selected}`;
       pStatus.className = "status";
     }

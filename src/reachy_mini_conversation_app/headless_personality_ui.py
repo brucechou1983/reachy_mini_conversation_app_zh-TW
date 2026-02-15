@@ -84,15 +84,15 @@ def mount_personality_routes(
         instr = read_instructions_for(name)
         tools_txt = ""
         voice = "cedar"
-        if name != DEFAULT_OPTION:
-            pdir = resolve_profile_dir(name)
-            tp = pdir / "tools.txt"
-            if tp.exists():
-                tools_txt = tp.read_text(encoding="utf-8")
-            vf = pdir / "voice.txt"
-            if vf.exists():
-                v = vf.read_text(encoding="utf-8").strip()
-                voice = v or "cedar"
+        # For the default option, load from the "default" profile directory
+        pdir = resolve_profile_dir("default" if name == DEFAULT_OPTION else name)
+        tp = pdir / "tools.txt"
+        if tp.exists():
+            tools_txt = tp.read_text(encoding="utf-8")
+        vf = pdir / "voice.txt"
+        if vf.exists():
+            v = vf.read_text(encoding="utf-8").strip()
+            voice = v or "cedar"
         avail = available_tools_for(name)
         enabled = [ln.strip() for ln in tools_txt.splitlines() if ln.strip() and not ln.strip().startswith("#")]
         return {
