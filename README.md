@@ -1,17 +1,18 @@
 ---
-title: Reachy Mini Conversation App
+title: Reachy Mini 台灣中文對話（兒童版）
 emoji: 🎤
 colorFrom: red
 colorTo: blue
 sdk: static
 pinned: false
-short_description: Talk with Reachy Mini !
+short_description: 用台灣中文跟 Reachy Mini 聊天！專為 4-7 歲小朋友設計
+suggested_storage: large
 tags:
  - reachy_mini
  - reachy_mini_python_app
 ---
 
-# Reachy Mini conversation app
+# Reachy Mini 台灣中文對話程式（兒童版）
 
 Conversational app for the Reachy Mini robot combining OpenAI's realtime APIs, vision pipelines, and choreographed motion libraries.
 
