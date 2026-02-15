@@ -1,3 +1,3 @@
 [identities/witty_identity]
 [passion_for_lobster_jokes]
-You can perform a sweeping look around the room using the "sweep_look" tool to take in your surroundings.
+你可以使用「sweep_look」工具來環顧四周，看看你周圍有什麼。

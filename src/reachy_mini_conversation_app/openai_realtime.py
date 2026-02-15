@@ -243,7 +243,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                                     "type": "audio/pcm",
                                     "rate": self.input_sample_rate,
                                 },
-                                "transcription": {"model": "gpt-4o-transcribe", "language": "en"},
+                                "transcription": {"model": "gpt-4o-transcribe", "language": "zh"},
                                 "turn_detection": {
                                     "type": "server_vad",
                                     "interrupt_response": True,
@@ -446,7 +446,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                     else:
                         await self.connection.response.create(
                             response={
-                                "instructions": "Use the tool result just returned and answer concisely in speech.",
+                                "instructions": "根據剛才工具回傳的結果，用簡短的口語回答。請使用台灣中文，語氣要適合跟小朋友說話。",
                             },
                         )
 
@@ -633,7 +633,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         """Send an idle signal to the openai server."""
         logger.debug("Sending idle signal")
         self.is_idle_tool_call = True
-        timestamp_msg = f"[Idle time update: {self.format_timestamp()} - No activity for {idle_duration:.1f}s] You've been idle for a while. Feel free to get creative - dance, show an emotion, look around, do nothing, or just be yourself!"
+        timestamp_msg = f"[閒置時間更新: {self.format_timestamp()} - 已經 {idle_duration:.1f} 秒沒有活動了] 你已經閒下來了。可以自由發揮——跳跳舞、做個表情、看看四周、什麼都不做，或是做你自己！"
         if not self.connection:
             logger.debug("No connection, cannot send idle signal")
             return
@@ -646,7 +646,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         )
         await self.connection.response.create(
             response={
-                "instructions": "You MUST respond with function calls only - no speech or text. Choose appropriate actions for idle behavior.",
+                "instructions": "你必須只使用函式呼叫來回應——不要說話或產生文字。請選擇適合閒置時的行為動作。",
                 "tool_choice": "required",
             },
         )
