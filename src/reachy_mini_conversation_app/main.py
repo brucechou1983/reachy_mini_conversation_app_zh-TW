@@ -44,7 +44,9 @@ def run(
     """Run the Reachy Mini conversation app."""
     # Putting these dependencies here makes the dashboard faster to load when the conversation app is installed
     from reachy_mini_conversation_app.moves import MovementManager
+    from reachy_mini_conversation_app.config import config
     from reachy_mini_conversation_app.console import LocalStream
+    from reachy_mini_conversation_app.memory import MemoryStore
     from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
     from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
     from reachy_mini_conversation_app.audio.head_wobbler import HeadWobbler
@@ -107,12 +109,32 @@ def run(
 
     head_wobbler = HeadWobbler(set_speech_offsets=movement_manager.set_speech_offsets)
 
+    memory_store = MemoryStore(instance_path=instance_path)
+    logger.info("Long-term memory initialized with %d entries", len(memory_store.list_all()))
+
+    initial_profile = config.REACHY_MINI_CUSTOM_PROFILE
+    if initial_profile:
+        profile_memory_store = MemoryStore.for_profile(
+            profile_name=initial_profile,
+            instance_path=instance_path,
+        )
+        logger.info(
+            "Profile memory initialized for %r with %d entries",
+            initial_profile,
+            len(profile_memory_store.list_all()),
+        )
+    else:
+        profile_memory_store = None
+        logger.info("No initial profile set; profile memory store is inactive")
+
     deps = ToolDependencies(
         reachy_mini=robot,
         movement_manager=movement_manager,
         camera_worker=camera_worker,
         vision_manager=vision_manager,
         head_wobbler=head_wobbler,
+        memory_store=memory_store,
+        profile_memory_store=profile_memory_store,
     )
     current_file_path = os.path.dirname(os.path.abspath(__file__))
     logger.debug(f"Current file absolute path: {current_file_path}")
