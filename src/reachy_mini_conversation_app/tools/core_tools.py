@@ -57,6 +57,7 @@ class ToolDependencies:
     head_wobbler: Any | None = None  # HeadWobbler for audio-reactive motion
     memory_store: Any | None = None  # MemoryStore for long-term memory
     profile_memory_store: Any | None = None  # MemoryStore for per-profile memory
+    realtime_handler: Any | None = None  # OpenaiRealtimeHandler for message injection
     motion_duration_s: float = 1.0
 
 

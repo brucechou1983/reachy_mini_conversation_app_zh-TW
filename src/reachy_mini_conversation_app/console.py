@@ -25,6 +25,7 @@ from reachy_mini.media.media_manager import MediaBackend
 from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
 from reachy_mini_conversation_app.headless_personality_ui import mount_personality_routes
+from reachy_mini_conversation_app.story_routes import mount_story_routes
 
 
 try:
@@ -201,6 +202,47 @@ class LocalStream:
         except Exception as e:
             logger.warning("Failed to persist TAVILY_API_KEY: %s", e)
 
+    def _persist_gemini_key(self, key: str) -> None:
+        """Persist Gemini API key to environment and instance ``.env`` if possible."""
+        k = (key or "").strip()
+        if not k:
+            return
+        try:
+            os.environ["GEMINI_API_KEY"] = k
+        except Exception:
+            pass
+        try:
+            config.GEMINI_API_KEY = k
+        except Exception:
+            pass
+
+        if not self._instance_path:
+            return
+        try:
+            inst = Path(self._instance_path)
+            env_path = inst / ".env"
+            lines = self._read_env_lines(env_path)
+            replaced = False
+            for i, ln in enumerate(lines):
+                if ln.strip().startswith("GEMINI_API_KEY="):
+                    lines[i] = f"GEMINI_API_KEY={k}"
+                    replaced = True
+                    break
+            if not replaced:
+                lines.append(f"GEMINI_API_KEY={k}")
+            final_text = "\n".join(lines) + "\n"
+            env_path.write_text(final_text, encoding="utf-8")
+            logger.info("Persisted GEMINI_API_KEY to %s", env_path)
+
+            try:
+                from dotenv import load_dotenv
+
+                load_dotenv(dotenv_path=str(env_path), override=True)
+            except Exception:
+                pass
+        except Exception as e:
+            logger.warning("Failed to persist GEMINI_API_KEY: %s", e)
+
     def _persist_personality(self, profile: Optional[str]) -> None:
         """Persist the startup personality to the instance .env and config."""
         selection = (profile or "").strip() or None
@@ -360,6 +402,27 @@ class LocalStream:
             self._persist_tavily_key(key)
             return JSONResponse({"ok": True})
 
+        # GET /gemini_status -> whether Gemini key is set
+        @self._settings_app.get("/gemini_status")
+        def _gemini_status() -> JSONResponse:
+            has_key = bool(config.GEMINI_API_KEY and str(config.GEMINI_API_KEY).strip())
+            return JSONResponse({"has_key": has_key})
+
+        # POST /gemini_api_key -> set/persist Gemini key
+        class GeminiKeyPayload(BaseModel):
+            key: str
+
+        @self._settings_app.post("/gemini_api_key")
+        def _set_gemini_key(payload: GeminiKeyPayload) -> JSONResponse:
+            key = (payload.key or "").strip()
+            if not key:
+                return JSONResponse({"ok": False, "error": "empty_key"}, status_code=400)
+            self._persist_gemini_key(key)
+            return JSONResponse({"ok": True})
+
+        # Mount story reader routes
+        mount_story_routes(self._settings_app)
+
         self._settings_initialized = True
 
     def launch(self) -> None:
@@ -391,6 +454,12 @@ class LocalStream:
                     if new_tavily_key:
                         try:
                             config.TAVILY_API_KEY = new_tavily_key
+                        except Exception:
+                            pass
+                    new_gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
+                    if new_gemini_key:
+                        try:
+                            config.GEMINI_API_KEY = new_gemini_key
                         except Exception:
                             pass
                     new_profile = os.getenv("REACHY_MINI_CUSTOM_PROFILE")
@@ -457,6 +526,7 @@ class LocalStream:
                         persist_personality=self._persist_personality,
                         get_persisted_personality=self._read_persisted_personality,
                         persist_tavily_key=self._persist_tavily_key,
+                        persist_gemini_key=self._persist_gemini_key,
                     )
             except Exception:
                 pass

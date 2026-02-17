@@ -1,0 +1,14 @@
+story_book_create
+story_book_go_to_page
+story_book_close
+dance
+stop_dance
+play_emotion
+stop_emotion
+do_nothing
+head_tracking
+move_head
+save_memory
+forget_memory
+save_profile_memory
+forget_profile_memory

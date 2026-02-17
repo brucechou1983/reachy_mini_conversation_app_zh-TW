@@ -1,0 +1,234 @@
+:root {
+  --reader-bg: #1a1520;
+  --reader-text: #f5e6d3;
+  --reader-accent: #ffd166;
+  --reader-muted: rgba(245, 230, 211, 0.6);
+  --reader-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: "Noto Sans TC", "Microsoft JhengHei", "Segoe UI", sans-serif;
+  background: var(--reader-bg);
+  color: var(--reader-text);
+  min-height: 100vh;
+  overflow: hidden;
+}
+
+.screen {
+  display: none;
+  position: fixed;
+  inset: 0;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.screen.active {
+  display: flex;
+}
+
+/* ---- Loading screen ---- */
+#loading-screen {
+  background: radial-gradient(circle at 50% 40%, #2a1f3d, var(--reader-bg));
+  text-align: center;
+}
+
+#loading-screen .book-icon {
+  font-size: 80px;
+  margin-bottom: 24px;
+  animation: float 2s ease-in-out infinite;
+}
+
+#loading-screen h1 {
+  font-size: 28px;
+  color: var(--reader-accent);
+  margin-bottom: 12px;
+}
+
+#loading-screen p {
+  color: var(--reader-muted);
+  font-size: 18px;
+  max-width: 400px;
+}
+
+.loading-dots {
+  display: flex;
+  gap: 8px;
+  margin-top: 24px;
+  justify-content: center;
+}
+
+.loading-dots span {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--reader-accent);
+  animation: bounce 1.4s ease-in-out infinite;
+}
+
+.loading-dots span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.loading-dots span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+@keyframes bounce {
+  0%,
+  80%,
+  100% {
+    transform: scale(0.6);
+    opacity: 0.4;
+  }
+  40% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* ---- Reader screen ---- */
+#reader-screen {
+  background: var(--reader-bg);
+}
+
+.page-container {
+  width: 90vw;
+  max-width: 800px;
+  height: 88vh;
+  display: flex;
+  flex-direction: column;
+  border-radius: 20px;
+  overflow: hidden;
+  background: linear-gradient(135deg, #2a2035, #1e1828);
+  box-shadow: var(--reader-shadow);
+  border: 1px solid rgba(255, 209, 102, 0.15);
+}
+
+.illustration {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.2);
+  min-height: 0;
+  padding: 12px;
+}
+
+.illustration img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 12px;
+}
+
+.illustration img[src=""] {
+  display: none;
+}
+
+.text-area {
+  padding: 20px 28px;
+  text-align: center;
+  background: rgba(42, 32, 53, 0.9);
+  border-top: 1px solid rgba(255, 209, 102, 0.1);
+  min-height: 100px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.text-area p {
+  font-size: 22px;
+  line-height: 1.7;
+  color: var(--reader-text);
+}
+
+.page-indicator {
+  text-align: center;
+  padding: 10px;
+  font-size: 14px;
+  color: var(--reader-muted);
+  background: rgba(0, 0, 0, 0.15);
+}
+
+/* ---- End screen ---- */
+#end-screen {
+  background: radial-gradient(circle at 50% 40%, #2a1f3d, var(--reader-bg));
+  text-align: center;
+}
+
+#end-screen .book-icon {
+  font-size: 80px;
+  margin-bottom: 24px;
+  animation: float 2s ease-in-out infinite;
+}
+
+#end-screen h1 {
+  font-size: 32px;
+  color: var(--reader-accent);
+  margin-bottom: 12px;
+}
+
+#end-screen p {
+  color: var(--reader-muted);
+  font-size: 20px;
+}
+
+/* ---- Animations ---- */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.page-container {
+  animation: fadeIn 0.5s ease;
+}
+
+/* ---- Responsive ---- */
+@media (max-width: 600px) {
+  .page-container {
+    width: 98vw;
+    height: 94vh;
+    border-radius: 12px;
+  }
+
+  .text-area {
+    padding: 14px 18px;
+  }
+
+  .text-area p {
+    font-size: 18px;
+  }
+
+  #loading-screen .book-icon,
+  #end-screen .book-icon {
+    font-size: 60px;
+  }
+
+  #loading-screen h1 {
+    font-size: 22px;
+  }
+}

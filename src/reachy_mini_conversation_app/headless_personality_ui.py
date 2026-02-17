@@ -34,6 +34,7 @@ def mount_personality_routes(
     persist_personality: Callable[[Optional[str]], None] | None = None,
     get_persisted_personality: Callable[[], Optional[str]] | None = None,
     persist_tavily_key: Callable[[str], None] | None = None,
+    persist_gemini_key: Callable[[str], None] | None = None,
 ) -> None:
     """Register personality management endpoints on a FastAPI app."""
     try:
@@ -279,6 +280,31 @@ def mount_personality_routes(
 
                 _os.environ["TAVILY_API_KEY"] = key
                 config.TAVILY_API_KEY = key
+            except Exception:
+                pass
+        return {"ok": True}
+
+    class GeminiKeyPayload(BaseModel):
+        key: str
+
+    @app.post("/gemini_api_key")
+    async def _set_gemini_key(payload: GeminiKeyPayload) -> dict:  # type: ignore
+        key = (payload.key or "").strip()
+        if not key:
+            return JSONResponse({"ok": False, "error": "empty_key"}, status_code=400)  # type: ignore
+        if persist_gemini_key is not None:
+            try:
+                persist_gemini_key(key)
+            except Exception as e:
+                logger.warning("Failed to persist Gemini key: %s", e)
+                return JSONResponse({"ok": False, "error": str(e)}, status_code=500)  # type: ignore
+        else:
+            # Fallback: at least set in-memory
+            try:
+                import os as _os
+
+                _os.environ["GEMINI_API_KEY"] = key
+                config.GEMINI_API_KEY = key
             except Exception:
                 pass
         return {"ok": True}
