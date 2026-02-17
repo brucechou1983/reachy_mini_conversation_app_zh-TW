@@ -6,6 +6,7 @@ file so the robot can remember important information across sessions.
 
 import json
 import logging
+import re
 import threading
 import uuid
 from datetime import datetime, timezone
@@ -15,7 +16,9 @@ from typing import Any, Dict, List, Literal, Optional
 logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_MEMORIES = 20
+DEFAULT_MAX_PROFILE_MEMORIES = 10
 _FILENAME = "memories.json"
+_PROFILE_MEMORIES_DIR = "profile_memories"
 
 
 def _fallback_path() -> Path:
@@ -39,6 +42,7 @@ class MemoryStore:
         self,
         instance_path: Optional[str | Path] = None,
         max_memories: int = DEFAULT_MAX_MEMORIES,
+        header: str = "## 長期記憶",
     ) -> None:
         if instance_path is not None:
             self._path = Path(instance_path) / _FILENAME
@@ -46,9 +50,36 @@ class MemoryStore:
             self._path = _fallback_path()
 
         self._max = max_memories
+        self._header = header
         self._lock = threading.Lock()
         self._memories: List[Dict[str, Any]] = []
         self._load()
+
+    @classmethod
+    def for_profile(
+        cls,
+        profile_name: str,
+        instance_path: Optional[str | Path] = None,
+        max_memories: int = DEFAULT_MAX_PROFILE_MEMORIES,
+    ) -> "MemoryStore":
+        """Create a MemoryStore scoped to a specific profile.
+
+        Stores data in ``{instance_path}/profile_memories/{safe_name}.json``.
+        """
+        safe_name = re.sub(r"[^\w\-]", "_", profile_name)
+        if instance_path is not None:
+            path = Path(instance_path) / _PROFILE_MEMORIES_DIR / f"{safe_name}.json"
+        else:
+            path = Path.home() / ".reachy_mini_profile_memories" / f"{safe_name}.json"
+
+        store = cls.__new__(cls)
+        store._path = path
+        store._max = max_memories
+        store._header = f"## 角色記憶（{profile_name}）"
+        store._lock = threading.Lock()
+        store._memories = []
+        store._load()
+        return store
 
     # ------------------------------------------------------------------
     # Public API
@@ -102,7 +133,7 @@ class MemoryStore:
         if not memories:
             return ""
 
-        lines = ["## 長期記憶", "以下是你記得的重要資訊，請在對話中自然地運用這些記憶：", ""]
+        lines = [self._header, "以下是你記得的重要資訊，請在對話中自然地運用這些記憶：", ""]
         for m in memories:
             tag = "📌" if m["type"] == "fact" else "📝"
             lines.append(f"- {tag} [{m['id']}] {m['content']}")

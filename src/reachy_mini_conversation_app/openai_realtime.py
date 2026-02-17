@@ -96,8 +96,24 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                 "Set custom profile to %r (config=%r)", profile, getattr(_config, "REACHY_MINI_CUSTOM_PROFILE", None)
             )
 
+            # Swap per-profile memory store
+            from reachy_mini_conversation_app.memory import MemoryStore as _MemoryStore
+
+            if profile:
+                self.deps.profile_memory_store = _MemoryStore.for_profile(
+                    profile_name=profile,
+                    instance_path=self.instance_path,
+                )
+                logger.info("Switched profile memory store to profile=%r", profile)
+            else:
+                self.deps.profile_memory_store = None
+                logger.info("Cleared profile memory store (no active profile)")
+
             try:
-                instructions = get_session_instructions(memory_store=self.deps.memory_store)
+                instructions = get_session_instructions(
+                    memory_store=self.deps.memory_store,
+                    profile_memory_store=self.deps.profile_memory_store,
+                )
                 voice = get_session_voice()
             except BaseException as e:  # catch SystemExit from prompt loader without crashing
                 logger.error("Failed to resolve personality content: %s", e)
@@ -236,7 +252,10 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                 await conn.session.update(
                     session={
                         "type": "realtime",
-                        "instructions": get_session_instructions(memory_store=self.deps.memory_store),
+                        "instructions": get_session_instructions(
+                            memory_store=self.deps.memory_store,
+                            profile_memory_store=self.deps.profile_memory_store,
+                        ),
                         "audio": {
                             "input": {
                                 "format": {
@@ -382,9 +401,15 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                         tool_result = {"error": str(e)}
 
                     # Refresh system prompt when memory changes so the LLM sees updates immediately
-                    if tool_name in ("save_memory", "forget_memory") and "error" not in tool_result:
+                    if tool_name in (
+                        "save_memory", "forget_memory",
+                        "save_profile_memory", "forget_profile_memory",
+                    ) and "error" not in tool_result:
                         try:
-                            updated = get_session_instructions(memory_store=self.deps.memory_store)
+                            updated = get_session_instructions(
+                                memory_store=self.deps.memory_store,
+                                profile_memory_store=self.deps.profile_memory_store,
+                            )
                             await self.connection.session.update(
                                 session={"instructions": updated},
                             )

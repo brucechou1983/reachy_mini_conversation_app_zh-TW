@@ -8,3 +8,5 @@ head_tracking
 move_head
 save_memory
 forget_memory
+save_profile_memory
+forget_profile_memory

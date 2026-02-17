@@ -13,3 +13,5 @@ stop_emotion
 sweep_look
 save_memory
 forget_memory
+save_profile_memory
+forget_profile_memory

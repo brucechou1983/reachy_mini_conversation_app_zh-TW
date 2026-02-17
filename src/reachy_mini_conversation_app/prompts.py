@@ -60,11 +60,15 @@ def _expand_prompt_includes(content: str) -> str:
     return '\n'.join(expanded_lines)
 
 
-def get_session_instructions(memory_store: Any | None = None) -> str:
+def get_session_instructions(
+    memory_store: Any | None = None,
+    profile_memory_store: Any | None = None,
+) -> str:
     """Get session instructions, loading from REACHY_MINI_CUSTOM_PROFILE if set.
 
     If a ``MemoryStore`` is provided, its contents are appended to the
-    instructions so the robot has access to long-term memories.
+    instructions so the robot has access to long-term memories.  A separate
+    ``profile_memory_store`` adds per-profile activity summaries.
     """
     profile = config.REACHY_MINI_CUSTOM_PROFILE
     if not profile:
@@ -86,6 +90,12 @@ def get_session_instructions(memory_store: Any | None = None) -> str:
                     memory_block = memory_store.format_for_prompt()
                     if memory_block:
                         expanded_instructions = expanded_instructions + "\n\n" + memory_block
+
+                # Append per-profile activity memories if available
+                if profile_memory_store is not None:
+                    profile_block = profile_memory_store.format_for_prompt()
+                    if profile_block:
+                        expanded_instructions = expanded_instructions + "\n\n" + profile_block
 
                 return expanded_instructions
             logger.error(f"Profile '{profile}' has empty {INSTRUCTIONS_FILENAME}")

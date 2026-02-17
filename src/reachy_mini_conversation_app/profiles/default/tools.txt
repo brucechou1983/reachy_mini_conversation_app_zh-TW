@@ -9,3 +9,5 @@ move_head
 web_search
 save_memory
 forget_memory
+save_profile_memory
+forget_profile_memory
