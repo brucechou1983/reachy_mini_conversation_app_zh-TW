@@ -7,3 +7,5 @@ do_nothing
 head_tracking
 move_head
 web_search
+save_memory
+forget_memory

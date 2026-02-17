@@ -97,7 +97,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
             )
 
             try:
-                instructions = get_session_instructions()
+                instructions = get_session_instructions(memory_store=self.deps.memory_store)
                 voice = get_session_voice()
             except BaseException as e:  # catch SystemExit from prompt loader without crashing
                 logger.error("Failed to resolve personality content: %s", e)
@@ -236,7 +236,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                 await conn.session.update(
                     session={
                         "type": "realtime",
-                        "instructions": get_session_instructions(),
+                        "instructions": get_session_instructions(memory_store=self.deps.memory_store),
                         "audio": {
                             "input": {
                                 "format": {
@@ -380,6 +380,17 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                     except Exception as e:
                         logger.error("Tool '%s' failed", tool_name)
                         tool_result = {"error": str(e)}
+
+                    # Refresh system prompt when memory changes so the LLM sees updates immediately
+                    if tool_name in ("save_memory", "forget_memory") and "error" not in tool_result:
+                        try:
+                            updated = get_session_instructions(memory_store=self.deps.memory_store)
+                            await self.connection.session.update(
+                                session={"instructions": updated},
+                            )
+                            logger.debug("Refreshed instructions after %s", tool_name)
+                        except Exception as e:
+                            logger.warning("Failed to refresh instructions after %s: %s", tool_name, e)
 
                     # send the tool result back
                     if isinstance(call_id, str):

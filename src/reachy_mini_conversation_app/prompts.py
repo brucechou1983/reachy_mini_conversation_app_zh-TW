@@ -1,6 +1,7 @@
 import re
 import sys
 import logging
+from typing import Any
 from pathlib import Path
 
 from reachy_mini_conversation_app.config import config
@@ -59,8 +60,12 @@ def _expand_prompt_includes(content: str) -> str:
     return '\n'.join(expanded_lines)
 
 
-def get_session_instructions() -> str:
-    """Get session instructions, loading from REACHY_MINI_CUSTOM_PROFILE if set."""
+def get_session_instructions(memory_store: Any | None = None) -> str:
+    """Get session instructions, loading from REACHY_MINI_CUSTOM_PROFILE if set.
+
+    If a ``MemoryStore`` is provided, its contents are appended to the
+    instructions so the robot has access to long-term memories.
+    """
     profile = config.REACHY_MINI_CUSTOM_PROFILE
     if not profile:
         logger.info(f"Loading default prompt from {PROMPTS_LIBRARY_DIRECTORY / 'default_prompt.txt'}")
@@ -75,6 +80,13 @@ def get_session_instructions() -> str:
             if instructions:
                 # Expand [<name>] placeholders with content from prompts library
                 expanded_instructions = _expand_prompt_includes(instructions)
+
+                # Append long-term memories if available
+                if memory_store is not None:
+                    memory_block = memory_store.format_for_prompt()
+                    if memory_block:
+                        expanded_instructions = expanded_instructions + "\n\n" + memory_block
+
                 return expanded_instructions
             logger.error(f"Profile '{profile}' has empty {INSTRUCTIONS_FILENAME}")
             sys.exit(1)
