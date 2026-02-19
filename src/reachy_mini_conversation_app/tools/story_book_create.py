@@ -1,26 +1,46 @@
 """Tool: story_book_create - Asynchronously generate a multi-page story book via Gemini."""
 
 from __future__ import annotations
-
-import asyncio
 import json
+import base64
+import asyncio
 import logging
 import webbrowser
 from typing import Any, Dict
 
-import httpx
+from google import genai
+from google.genai import types
 
 from reachy_mini_conversation_app.config import config
+from reachy_mini_conversation_app.story_store import StoryPage, StoryStore
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
-from reachy_mini_conversation_app.story_store import StoryStore, StoryPage
 
 
 logger = logging.getLogger(__name__)
 
 GEMINI_TEXT_MODEL = "gemini-2.5-flash"
 GEMINI_IMAGE_MODEL = "gemini-2.5-flash-image"
-GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 NUM_PAGES = 8
+
+# Retry configuration for Gemini API calls
+_RETRY_OPTIONS = types.HttpRetryOptions(
+    attempts=4,
+    initial_delay=2.0,
+    max_delay=16.0,
+    exp_base=2.0,
+    http_status_codes=[429, 500, 502, 503, 504],
+)
+
+
+def _make_client(api_key: str, timeout: float = 60_000) -> genai.Client:
+    """Create a Gemini client with retry and timeout configuration."""
+    return genai.Client(
+        api_key=api_key,
+        http_options=types.HttpOptions(
+            timeout=int(timeout),
+            retry_options=_RETRY_OPTIONS,
+        ),
+    )
 
 
 class StoryBookCreate(Tool):
@@ -156,28 +176,18 @@ async def _generate_story_text(api_key: str, theme: str) -> list[str] | None:
         "只回傳 JSON，不要有其他文字。"
     )
 
-    url = f"{GEMINI_API_BASE}/{GEMINI_TEXT_MODEL}:generateContent?key={api_key}"
-    body = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {
-            "responseMimeType": "application/json",
-            "temperature": 0.9,
-        },
-    }
-
+    client = _make_client(api_key, timeout=60_000)
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.post(url, json=body)
-            if resp.status_code != 200:
-                logger.error(
-                    "Gemini text API error: status=%d url=%s body=%s",
-                    resp.status_code, url.split("?")[0], resp.text[:500],
-                )
-            resp.raise_for_status()
-            data = resp.json()
+        response = await client.aio.models.generate_content(
+            model=GEMINI_TEXT_MODEL,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                temperature=0.9,
+            ),
+        )
 
-        # Extract text from Gemini response
-        text = data["candidates"][0]["content"]["parts"][0]["text"]
+        text = response.text
         parsed = json.loads(text)
         pages = parsed.get("pages", [])
         if len(pages) != NUM_PAGES:
@@ -187,6 +197,8 @@ async def _generate_story_text(api_key: str, theme: str) -> list[str] | None:
     except Exception as e:
         logger.exception("Gemini text generation failed: %s", e)
         return None
+    finally:
+        await client.aio.aclose()
 
 
 async def _generate_illustration(
@@ -201,97 +213,53 @@ async def _generate_illustration(
         "picture book art style. No text or words in the image."
     )
 
-    url = f"{GEMINI_API_BASE}/{GEMINI_IMAGE_MODEL}:generateContent?key={api_key}"
-    body = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {
-            "responseModalities": ["TEXT", "IMAGE"],
-        },
-        "safetySettings": [
-            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_ONLY_HIGH"},
-            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_ONLY_HIGH"},
-            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_ONLY_HIGH"},
-            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_ONLY_HIGH"},
-        ],
-    }
+    client = _make_client(api_key, timeout=120_000)
+    try:
+        response = await client.aio.models.generate_content(
+            model=GEMINI_IMAGE_MODEL,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_modalities=["TEXT", "IMAGE"],
+                safety_settings=[
+                    types.SafetySetting(
+                        category="HARM_CATEGORY_DANGEROUS_CONTENT",
+                        threshold="BLOCK_ONLY_HIGH",
+                    ),
+                    types.SafetySetting(
+                        category="HARM_CATEGORY_HARASSMENT",
+                        threshold="BLOCK_ONLY_HIGH",
+                    ),
+                    types.SafetySetting(
+                        category="HARM_CATEGORY_HATE_SPEECH",
+                        threshold="BLOCK_ONLY_HIGH",
+                    ),
+                    types.SafetySetting(
+                        category="HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                        threshold="BLOCK_ONLY_HIGH",
+                    ),
+                ],
+            ),
+        )
 
-    max_retries = 3
-    for attempt in range(max_retries + 1):
-        try:
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                resp = await client.post(url, json=body)
+        # Extract image from response parts
+        if response.candidates:
+            candidate = response.candidates[0]
+            if candidate.content and candidate.content.parts:
+                for part in candidate.content.parts:
+                    if part.inline_data is not None:
+                        mime = part.inline_data.mime_type or "image/png"
+                        image_bytes = part.inline_data.data
+                        image_b64 = base64.b64encode(image_bytes).decode("ascii")
+                        return image_b64, mime
 
-                # Retry on transient HTTP errors
-                if resp.status_code in (429, 503) and attempt < max_retries:
-                    delay = 2 ** (attempt + 1)  # 2s, 4s, 8s
-                    logger.warning(
-                        "Gemini image API returned %d for page %d/%d; retrying in %ds (attempt %d/%d)",
-                        resp.status_code, page_num, total_pages, delay, attempt + 1, max_retries,
-                    )
-                    await asyncio.sleep(delay)
-                    continue
+        logger.warning(
+            "No image data in Gemini response for page %d/%d",
+            page_num, total_pages,
+        )
+        return "", "image/png"
 
-                if resp.status_code != 200:
-                    logger.error(
-                        "Gemini image API error: status=%d page=%d/%d url=%s body=%s",
-                        resp.status_code, page_num, total_pages, url.split("?")[0], resp.text[:500],
-                    )
-                resp.raise_for_status()
-                data = resp.json()
-
-            # Extract image from response
-            candidate = data.get("candidates", [{}])[0]
-            content = candidate.get("content")
-            if not content:
-                reason = candidate.get("finishReason", "unknown")
-                if attempt < max_retries:
-                    delay = 2 ** (attempt + 1)
-                    logger.warning(
-                        "Gemini image response has no content for page %d (finishReason=%s); retrying in %ds (attempt %d/%d)",
-                        page_num, reason, delay, attempt + 1, max_retries,
-                    )
-                    await asyncio.sleep(delay)
-                    continue
-                logger.warning(
-                    "Gemini image response has no content for page %d after %d retries (finishReason=%s)",
-                    page_num, max_retries, reason,
-                )
-                return "", "image/png"
-
-            parts = content.get("parts", [])
-            for part in parts:
-                if "inlineData" in part:
-                    mime = part["inlineData"].get("mimeType", "image/png")
-                    return part["inlineData"]["data"], mime
-
-            # Got content but no image (text-only response) — retry
-            if attempt < max_retries:
-                delay = 2 ** (attempt + 1)
-                logger.warning(
-                    "No image data in Gemini response for page %d (text-only); retrying in %ds (attempt %d/%d)",
-                    page_num, delay, attempt + 1, max_retries,
-                )
-                await asyncio.sleep(delay)
-                continue
-
-            logger.warning(
-                "No image data in Gemini response for page %d after %d retries; keys in parts: %s",
-                page_num, max_retries, [list(p.keys()) for p in parts],
-            )
-            return "", "image/png"
-
-        except (httpx.ConnectError, httpx.ReadTimeout, httpx.WriteTimeout) as e:
-            if attempt < max_retries:
-                delay = 2 ** (attempt + 1)
-                logger.warning(
-                    "Gemini image connection error for page %d/%d: %s; retrying in %ds (attempt %d/%d)",
-                    page_num, total_pages, e, delay, attempt + 1, max_retries,
-                )
-                await asyncio.sleep(delay)
-                continue
-            logger.error("Gemini image generation failed for page %d/%d after %d retries: %s", page_num, total_pages, max_retries, e)
-            return "", "image/png"
-
-        except Exception as e:
-            logger.error("Gemini image generation failed for page %d/%d: %s", page_num, total_pages, e)
-            return "", "image/png"
+    except Exception as e:
+        logger.error("Gemini image generation failed for page %d/%d: %s", page_num, total_pages, e)
+        return "", "image/png"
+    finally:
+        await client.aio.aclose()
