@@ -1,4 +1,10 @@
-"""Tool: story_book_go_to_page - Navigate to a page and read it aloud."""
+"""Tool: story_book_go_to_page - Navigate to a page and read it aloud.
+
+TODO: Fix known issues:
+1. Sometimes after go_to_page, the robot stops talking and doesn't read the page aloud.
+2. Sometimes the robot advances to the next page too early before finishing the current page.
+3. Off-by-one page index: telling the robot to go to the 5th page goes to the 6th instead.
+"""
 
 from __future__ import annotations
 
