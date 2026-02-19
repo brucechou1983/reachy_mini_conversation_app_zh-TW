@@ -1,11 +1,14 @@
 """Tool to capture a photo from the robot's camera and save it as PNG."""
 
 import logging
+import asyncio
 from pathlib import Path
 from datetime import datetime
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import cv2
+import numpy as np
+from numpy.typing import NDArray
 
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
 
@@ -27,13 +30,17 @@ class TakePhoto(Tool):
     }
 
     async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
-        """Capture frame and save as PNG."""
+        """Capture frame at highest available resolution and save as PNG."""
         logger.info("Tool call: take_photo")
 
         if deps.camera_worker is None:
             return {"error": "Camera worker not available"}
 
-        frame = deps.camera_worker.get_latest_frame()
+        # Try high-res capture first, fall back to buffered frame
+        frame = await self._capture_high_res(deps)
+        if frame is None:
+            frame = deps.camera_worker.get_latest_frame()
+
         if frame is None:
             return {"error": "No frame available from camera"}
 
@@ -47,9 +54,71 @@ class TakePhoto(Tool):
         if not success:
             return {"error": "Failed to save photo"}
 
-        logger.info("Photo saved: %s", filepath)
+        h, w = frame.shape[:2]
+        logger.info("Photo saved: %s (%dx%d)", filepath, w, h)
         return {
             "status": "success",
             "filename": filename,
             "path": str(filepath),
+            "resolution": f"{w}x{h}",
         }
+
+    async def _capture_high_res(
+        self, deps: ToolDependencies
+    ) -> Optional[NDArray[np.uint8]]:
+        """Temporarily switch to the highest resolution, capture, and restore."""
+        original_res = None
+        try:
+            from reachy_mini.media.camera_constants import CameraResolution
+
+            camera = deps.reachy_mini.media.camera
+            if camera is None:
+                return None
+
+            # Find current resolution so we can restore it later
+            current_w, current_h = camera.resolution
+            for res in camera.camera_specs.available_resolutions:
+                if (res.value[0], res.value[1]) == (current_w, current_h):
+                    original_res = res
+                    break
+
+            # Pick the highest available resolution
+            best_res = max(
+                camera.camera_specs.available_resolutions,
+                key=lambda r: r.value[0] * r.value[1],
+            )
+
+            # Skip if already at highest resolution
+            if best_res.value[0] * best_res.value[1] <= current_w * current_h:
+                return None
+
+            logger.info(
+                "Switching camera %dx%d -> %dx%d for photo capture",
+                current_w,
+                current_h,
+                best_res.value[0],
+                best_res.value[1],
+            )
+            camera.set_resolution(best_res)
+
+            # Wait for camera pipeline to settle, then capture
+            await asyncio.sleep(1.0)
+            frame = deps.reachy_mini.media.get_frame()
+
+            return frame
+
+        except Exception as e:
+            logger.warning("High-res capture failed, using buffered frame: %s", e)
+            return None
+
+        finally:
+            if original_res is not None:
+                try:
+                    deps.reachy_mini.media.camera.set_resolution(original_res)
+                    logger.info(
+                        "Camera resolution restored to %dx%d",
+                        original_res.value[0],
+                        original_res.value[1],
+                    )
+                except Exception as e:
+                    logger.warning("Failed to restore camera resolution: %s", e)
