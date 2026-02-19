@@ -361,7 +361,7 @@ class LocalStream:
             return JSONResponse({"ok": True})
 
         # ---- Photo Gallery Routes ----
-        import shutil
+
 
         _PHOTOS_DIR = Path.home() / "Pictures" / "reachy"
 
@@ -410,15 +410,6 @@ class LocalStream:
                 return JSONResponse({"error": "invalid_filename"}, status_code=400)
             if not photo_path.exists() or not photo_path.is_file():
                 return JSONResponse({"error": "not_found"}, status_code=404)
-            downloads_dir = Path.home() / "Downloads"
-            downloads_dir.mkdir(parents=True, exist_ok=True)
-            dest = downloads_dir / filename
-            counter = 1
-            while dest.exists():
-                dest = downloads_dir / f"{photo_path.stem}_{counter}.png"
-                counter += 1
-            shutil.copy2(photo_path, dest)
-            logger.info("Photo copied to Downloads: %s", dest)
             return FileResponse(
                 str(photo_path),
                 media_type="image/png",
