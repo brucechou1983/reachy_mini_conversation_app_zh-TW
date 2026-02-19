@@ -360,6 +360,77 @@ class LocalStream:
             self._persist_tavily_key(key)
             return JSONResponse({"ok": True})
 
+        # ---- Photo Gallery Routes ----
+
+
+        _PHOTOS_DIR = Path.home() / "Pictures" / "reachy"
+
+        def _safe_photo_path(filename: str) -> Path | None:
+            """Validate filename and return resolved path inside PHOTOS_DIR, or None."""
+            if "/" in filename or "\\" in filename or ".." in filename:
+                return None
+            candidate = (_PHOTOS_DIR / filename).resolve()
+            try:
+                if not candidate.is_relative_to(_PHOTOS_DIR.resolve()):
+                    return None
+            except (ValueError, RuntimeError):
+                return None
+            return candidate
+
+        @self._settings_app.get("/photos")
+        def _list_photos() -> JSONResponse:
+            if not _PHOTOS_DIR.exists():
+                return JSONResponse([])
+            photos = []
+            for p in _PHOTOS_DIR.glob("*.png"):
+                if not p.is_file() or p.is_symlink():
+                    continue
+                stat = p.stat()
+                photos.append({
+                    "filename": p.name,
+                    "timestamp": int(stat.st_mtime),
+                    "size": stat.st_size,
+                })
+            photos.sort(key=lambda x: x["filename"], reverse=True)
+            return JSONResponse(photos)
+
+        @self._settings_app.get("/photos/{filename}")
+        def _serve_photo(filename: str) -> Response:
+            photo_path = _safe_photo_path(filename)
+            if photo_path is None:
+                return JSONResponse({"error": "invalid_filename"}, status_code=400)
+            if not photo_path.exists() or not photo_path.is_file():
+                return JSONResponse({"error": "not_found"}, status_code=404)
+            return FileResponse(str(photo_path), media_type="image/png")
+
+        @self._settings_app.get("/photos/{filename}/download")
+        def _download_photo(filename: str) -> Response:
+            photo_path = _safe_photo_path(filename)
+            if photo_path is None:
+                return JSONResponse({"error": "invalid_filename"}, status_code=400)
+            if not photo_path.exists() or not photo_path.is_file():
+                return JSONResponse({"error": "not_found"}, status_code=404)
+            return FileResponse(
+                str(photo_path),
+                media_type="image/png",
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            )
+
+        @self._settings_app.delete("/photos/{filename}")
+        def _delete_photo(filename: str) -> JSONResponse:
+            photo_path = _safe_photo_path(filename)
+            if photo_path is None:
+                return JSONResponse({"ok": False, "error": "invalid_filename"}, status_code=400)
+            if not photo_path.exists() or not photo_path.is_file():
+                return JSONResponse({"ok": False, "error": "not_found"}, status_code=404)
+            try:
+                photo_path.unlink()
+                logger.info("Photo deleted: %s", photo_path)
+                return JSONResponse({"ok": True})
+            except Exception as e:
+                logger.error("Failed to delete photo: %s", e)
+                return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
         self._settings_initialized = True
 
     def launch(self) -> None:
