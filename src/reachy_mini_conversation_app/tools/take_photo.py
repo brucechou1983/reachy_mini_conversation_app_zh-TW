@@ -40,7 +40,7 @@ class TakePhoto(Tool):
         was_tracking = deps.camera_worker.is_head_tracking_enabled
         try:
             self._freeze(deps, was_tracking)
-            await asyncio.sleep(0.5)  # let the robot settle
+            await asyncio.sleep(1.0)  # let the robot settle
 
             # Try high-res capture first, fall back to buffered frame
             frame = await self._capture_high_res(deps)
