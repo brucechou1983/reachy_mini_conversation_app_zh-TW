@@ -30,16 +30,24 @@ class TakePhoto(Tool):
     }
 
     async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
-        """Capture frame at highest available resolution and save as PNG."""
+        """Freeze robot, capture at highest resolution, then resume."""
         logger.info("Tool call: take_photo")
 
         if deps.camera_worker is None:
             return {"error": "Camera worker not available"}
 
-        # Try high-res capture first, fall back to buffered frame
-        frame = await self._capture_high_res(deps)
-        if frame is None:
-            frame = deps.camera_worker.get_latest_frame()
+        # Freeze the robot for a still capture
+        was_tracking = deps.camera_worker.is_head_tracking_enabled
+        try:
+            self._freeze(deps, was_tracking)
+            await asyncio.sleep(0.5)  # let the robot settle
+
+            # Try high-res capture first, fall back to buffered frame
+            frame = await self._capture_high_res(deps)
+            if frame is None:
+                frame = deps.camera_worker.get_latest_frame()
+        finally:
+            self._unfreeze(deps, was_tracking)
 
         if frame is None:
             return {"error": "No frame available from camera"}
@@ -62,6 +70,24 @@ class TakePhoto(Tool):
             "path": str(filepath),
             "resolution": f"{w}x{h}",
         }
+
+    def _freeze(self, deps: ToolDependencies, was_tracking: bool) -> None:
+        """Stop all movement sources so the robot holds still."""
+        logger.info("Freezing robot for photo capture")
+        # Stop dances, emotions, breathing
+        deps.movement_manager.clear_move_queue()
+        # Disable face tracking
+        if was_tracking:
+            deps.camera_worker.set_head_tracking_enabled(False)
+        # Zero speech sway
+        deps.movement_manager.set_speech_offsets((0.0, 0.0, 0.0, 0.0, 0.0, 0.0))
+
+    def _unfreeze(self, deps: ToolDependencies, was_tracking: bool) -> None:
+        """Restore movement sources after capture."""
+        logger.info("Unfreezing robot after photo capture")
+        if was_tracking:
+            deps.camera_worker.set_head_tracking_enabled(True)
+        # Breathing will restart automatically via MovementManager idle logic
 
     async def _capture_high_res(
         self, deps: ToolDependencies
