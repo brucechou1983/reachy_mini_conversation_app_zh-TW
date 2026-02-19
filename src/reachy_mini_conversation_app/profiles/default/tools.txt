@@ -11,3 +11,4 @@ save_memory
 forget_memory
 save_profile_memory
 forget_profile_memory
+take_photo

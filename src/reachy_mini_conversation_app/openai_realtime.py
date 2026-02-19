@@ -14,7 +14,7 @@ from openai import AsyncOpenAI
 from fastrtc import AdditionalOutputs, AsyncStreamHandler, wait_for_item, audio_to_int16
 from numpy.typing import NDArray
 from scipy.signal import resample
-from websockets.exceptions import ConnectionClosedError
+from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
 
 from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.prompts import get_session_voice, get_session_instructions
@@ -192,9 +192,9 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                 await self._run_realtime_session()
                 # Normal exit from the session, stop retrying
                 return
-            except ConnectionClosedError as e:
-                # Abrupt close (e.g., "no close frame received or sent") → retry
-                logger.warning("Realtime websocket closed unexpectedly (attempt %d/%d): %s", attempt, max_attempts, e)
+            except (ConnectionClosedError, ConnectionClosedOK) as e:
+                # Connection closed (restart or network issue) → retry
+                logger.warning("Realtime websocket closed (attempt %d/%d): %s", attempt, max_attempts, e)
                 if attempt < max_attempts:
                     # exponential backoff with jitter
                     base_delay = 2 ** (attempt - 1)  # 1s, 2s, 4s, 8s, etc.

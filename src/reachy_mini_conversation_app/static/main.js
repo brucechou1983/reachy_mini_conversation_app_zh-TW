@@ -459,6 +459,7 @@ async function init() {
     pSelect.addEventListener("change", loadSelected);
     await loadSelected();
     show(personalityPanel, true);
+    initPhotoGallery();
 
     // pAvail change handler registered in attachToolHandlers()
 
@@ -545,6 +546,131 @@ async function init() {
   } finally {
     // Hide loading when initial setup is done (regardless of key presence)
     show(loading, false);
+  }
+}
+
+// ---------- Photo Gallery ----------
+async function fetchPhotos() {
+  try {
+    const url = new URL("/photos", window.location.origin);
+    url.searchParams.set("_", Date.now().toString());
+    const resp = await fetchWithTimeout(url, {}, 3000);
+    if (!resp.ok) return [];
+    return await resp.json();
+  } catch (e) {
+    return [];
+  }
+}
+
+function renderPhotoGrid(photos) {
+  var grid = document.getElementById("photo-grid");
+  var countChip = document.getElementById("photo-count");
+  if (!grid) return;
+
+  if (!photos || photos.length === 0) {
+    grid.innerHTML = '<p class="muted">No photos yet.</p>';
+    if (countChip) countChip.textContent = "0 photos";
+    return;
+  }
+
+  if (countChip) countChip.textContent = photos.length + " photo" + (photos.length !== 1 ? "s" : "");
+
+  grid.innerHTML = "";
+  for (var i = 0; i < photos.length; i++) {
+    var photo = photos[i];
+    var item = document.createElement("div");
+    item.className = "photo-item";
+    item.dataset.filename = photo.filename;
+
+    var img = document.createElement("img");
+    img.src = "/photos/" + encodeURIComponent(photo.filename);
+    img.alt = photo.filename;
+    img.loading = "lazy";
+
+    var overlay = document.createElement("div");
+    overlay.className = "photo-overlay";
+    var date = new Date(photo.timestamp * 1000);
+    var dateStr = date.toLocaleString("en-CA", {
+      year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", hour12: false,
+    }).replace(",", "");
+    overlay.innerHTML = '<span class="photo-date">' + dateStr + "</span>";
+
+    item.appendChild(img);
+    item.appendChild(overlay);
+    grid.appendChild(item);
+
+    (function (fn) {
+      item.addEventListener("click", function () { showPhotoModal(fn); });
+    })(photo.filename);
+  }
+}
+
+function showPhotoModal(filename) {
+  var modal = document.getElementById("photo-modal");
+  var modalImage = document.getElementById("modal-image");
+  var downloadBtn = document.getElementById("modal-download");
+  var deleteBtn = document.getElementById("modal-delete");
+  var closeBtn = document.getElementById("modal-close");
+  var backdrop = modal.querySelector(".modal-backdrop");
+
+  modalImage.src = "/photos/" + encodeURIComponent(filename);
+  modal.classList.remove("hidden");
+  modal.dataset.currentFilename = filename;
+
+  function closeModal() { modal.classList.add("hidden"); }
+
+  backdrop.onclick = closeModal;
+  closeBtn.onclick = closeModal;
+
+  downloadBtn.onclick = function () {
+    var a = document.createElement("a");
+    a.href = "/photos/" + encodeURIComponent(filename) + "/download";
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
+  deleteBtn.onclick = async function () {
+    if (!confirm("Delete " + filename + "? This cannot be undone.")) return;
+    try {
+      var resp = await fetch("/photos/" + encodeURIComponent(filename), { method: "DELETE" });
+      var data = await resp.json().catch(function () { return {}; });
+      if (resp.ok && data.ok) {
+        closeModal();
+        fetchPhotos().then(renderPhotoGrid);
+      } else {
+        alert("Failed to delete: " + (data.error || "unknown error"));
+      }
+    } catch (e) {
+      alert("Failed to delete photo.");
+    }
+  };
+}
+
+document.addEventListener("keydown", function (e) {
+  if (e.key === "Escape") {
+    var modal = document.getElementById("photo-modal");
+    if (modal && !modal.classList.contains("hidden")) {
+      modal.classList.add("hidden");
+    }
+  }
+});
+
+var _photoRefreshInterval = null;
+
+function initPhotoGallery() {
+  var panel = document.getElementById("photo-gallery-panel");
+  if (!panel) return;
+  show(panel, true);
+  fetchPhotos().then(renderPhotoGrid);
+  if (!_photoRefreshInterval) {
+    _photoRefreshInterval = setInterval(function () {
+      if (panel && !panel.classList.contains("hidden")) {
+        fetchPhotos().then(renderPhotoGrid);
+      }
+    }, 5000);
   }
 }
 
