@@ -73,6 +73,10 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         self._shutdown_requested: bool = False
         self._connected_event: asyncio.Event = asyncio.Event()
 
+        # Track whether a response is currently in progress (set=idle, clear=busy)
+        self.response_idle: asyncio.Event = asyncio.Event()
+        self.response_idle.set()  # starts idle
+
     def copy(self) -> "OpenaiRealtimeHandler":
         """Create a copy of the handler."""
         return OpenaiRealtimeHandler(self.deps, self.gradio_mode, self.instance_path)
@@ -323,10 +327,12 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                     logger.debug("response completed")
 
                 if event.type == "response.created":
+                    self.response_idle.clear()
                     logger.debug("Response created")
 
                 if event.type == "response.done":
                     # Doesn't mean the audio is done playing
+                    self.response_idle.set()
                     logger.debug("Response done")
 
                 # Handle partial transcription (user speaking in real-time)

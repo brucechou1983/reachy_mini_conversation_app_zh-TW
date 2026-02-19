@@ -56,7 +56,7 @@ def mount_story_routes(app: FastAPI) -> None:
 
         return StreamingResponse(event_stream(), media_type="text/event-stream")
 
-    @app.get("/reader/story")
+    @app.get("/reader/story", response_model=None)
     def _reader_story() -> dict | JSONResponse:
         store = StoryStore.get()
         story = store.story
