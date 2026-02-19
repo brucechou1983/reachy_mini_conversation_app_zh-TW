@@ -2,11 +2,18 @@
   const loadingScreen = document.getElementById("loading-screen");
   const readerScreen = document.getElementById("reader-screen");
   const endScreen = document.getElementById("end-screen");
+  const errorScreen = document.getElementById("error-screen");
+  const errorMessage = document.getElementById("error-message");
   const pageImage = document.getElementById("page-image");
   const pageText = document.getElementById("page-text");
   const pageNum = document.getElementById("page-num");
   const pageTotal = document.getElementById("page-total");
   const loadingTitle = document.getElementById("loading-title");
+
+  function showError(msg) {
+    errorMessage.textContent = msg;
+    showScreen(errorScreen);
+  }
 
   function showScreen(screen) {
     document.querySelectorAll(".screen").forEach((s) => s.classList.remove("active"));
@@ -14,12 +21,18 @@
   }
 
   let evtSource = null;
+  let reconnectAttempts = 0;
+  const MAX_RECONNECT_ATTEMPTS = 10;
 
   function connectSSE() {
     if (evtSource) {
       evtSource.close();
     }
     evtSource = new EventSource("/reader/events");
+
+    evtSource.onopen = () => {
+      reconnectAttempts = 0;
+    };
 
     evtSource.onmessage = (event) => {
       try {
@@ -33,10 +46,24 @@
     evtSource.onerror = () => {
       evtSource.close();
       evtSource = null;
-      // Reconnect after 3 seconds
-      setTimeout(connectSSE, 3000);
+
+      if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+        console.error("Max SSE reconnection attempts reached");
+        showError("無法連線到伺服器，請重新整理頁面。");
+        return;
+      }
+
+      var delay = Math.min(3000 * Math.pow(2, reconnectAttempts), 30000);
+      reconnectAttempts++;
+      setTimeout(connectSSE, delay);
     };
   }
+
+  window.addEventListener("beforeunload", function () {
+    if (evtSource) {
+      evtSource.close();
+    }
+  });
 
   function handleEvent(data) {
     switch (data.event) {
@@ -93,7 +120,11 @@
   // Initial load - check for existing story state
   async function init() {
     try {
-      const resp = await fetch("/reader/story");
+      var controller = new AbortController();
+      var timeoutId = setTimeout(function () { controller.abort(); }, 5000);
+      var resp = await fetch("/reader/story", { signal: controller.signal });
+      clearTimeout(timeoutId);
+
       if (resp.ok) {
         const story = await resp.json();
         if (story.status === "generating") {
@@ -112,9 +143,16 @@
           loadingScreen.querySelector("h1").textContent = "故事準備好了！";
           if (story.title) loadingTitle.textContent = story.title;
         }
+      } else if (resp.status !== 404) {
+        showError("伺服器錯誤（" + resp.status + "），請稍後再試。");
+        return;
       }
     } catch (e) {
-      // No story yet
+      if (e.name === "AbortError") {
+        showError("連線逾時，請確認伺服器是否正常運作。");
+        return;
+      }
+      // No story yet — stay on loading screen
     }
 
     connectSSE();

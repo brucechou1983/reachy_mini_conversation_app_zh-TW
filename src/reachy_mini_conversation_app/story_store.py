@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
@@ -40,6 +41,7 @@ class StoryStore:
     """
 
     _instance: Optional[StoryStore] = None
+    _lock: threading.Lock = threading.Lock()
 
     def __init__(self) -> None:
         self._story: Optional[Story] = None
@@ -48,7 +50,9 @@ class StoryStore:
     @classmethod
     def get(cls) -> StoryStore:
         if cls._instance is None:
-            cls._instance = cls()
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = cls()
         return cls._instance
 
     @property
