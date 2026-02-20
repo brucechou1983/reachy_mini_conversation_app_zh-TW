@@ -758,6 +758,9 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
             logger.info("Story auto-advance: page %d already reached (current=%d), skipping", next_page, store.story.current_page)
             return  # already advanced past this page
 
+        # Wait for any in-progress response to finish before creating a new one.
+        await self.response_idle.wait()
+
         logger.info("Story auto-advance: advancing to page %d", next_page)
         await self.connection.conversation.item.create(
             item={
