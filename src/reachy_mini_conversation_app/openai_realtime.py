@@ -58,6 +58,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         self.last_activity_time = asyncio.get_event_loop().time()
         self.start_time = asyncio.get_event_loop().time()
         self.is_idle_tool_call = False
+        self._story_reading_next_page: int | None = None  # auto-advance page tracker
         self.gradio_mode = gradio_mode
         self.instance_path = instance_path
         # Track how the API key was provided (env vs textbox) and its value
@@ -335,6 +336,11 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                     self.response_idle.set()
                     logger.debug("Response done")
 
+                    next_page = self._story_reading_next_page
+                    if next_page is not None:
+                        self._story_reading_next_page = None  # clear to prevent double-fire
+                        asyncio.create_task(self._story_auto_advance(next_page))
+
                 # Handle partial transcription (user speaking in real-time)
                 if event.type == "conversation.item.input_audio_transcription.partial":
                     logger.debug(f"User partial transcript: {event.transcript}")
@@ -483,7 +489,26 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
 
                     # if this tool call was triggered by an idle signal, don't make the robot speak
                     # for other tool calls, let the robot reply out loud
-                    if self.is_idle_tool_call:
+                    if tool_name == "story_book_go_to_page" and tool_result.get("status") == "ok":
+                        # Track next page for auto-advance
+                        if tool_result.get("is_last_page"):
+                            self._story_reading_next_page = None
+                        else:
+                            self._story_reading_next_page = tool_result["page"] + 1
+
+                        await self.connection.response.create(
+                            response={
+                                "instructions": tool_result.get("instruction", ""),
+                            },
+                        )
+                    elif tool_name == "story_book_close":
+                        self._story_reading_next_page = None
+                        await self.connection.response.create(
+                            response={
+                                "instructions": "根據剛才工具回傳的結果，用簡短的口語回答。請使用台灣中文，語氣要適合跟小朋友說話。",
+                            },
+                        )
+                    elif self.is_idle_tool_call:
                         self.is_idle_tool_call = False
                     else:
                         await self.connection.response.create(
@@ -670,6 +695,43 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
             return voices
         except Exception:
             return fallback
+
+    async def _story_auto_advance(self, next_page: int) -> None:
+        """Wait briefly, then inject a go-to-next-page command."""
+        await asyncio.sleep(2.0)  # brief pause between pages
+
+        from reachy_mini_conversation_app.story_store import StoryStore
+
+        store = StoryStore.get()
+        if not store.story or store.story.status != "reading":
+            return  # story was closed or changed
+
+        # Wait for any in-progress response to finish
+        try:
+            await asyncio.wait_for(self.response_idle.wait(), timeout=15.0)
+        except asyncio.TimeoutError:
+            return
+
+        # Re-check after waiting
+        if not store.story or store.story.status != "reading":
+            return
+
+        if not self.connection:
+            return
+
+        await self.connection.conversation.item.create(
+            item={
+                "type": "message",
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": f"[系統: 請呼叫 story_book_go_to_page(page={next_page}) 翻到下一頁繼續朗讀故事。]",
+                    }
+                ],
+            },
+        )
+        await self.connection.response.create()
 
     async def send_idle_signal(self, idle_duration: float) -> None:
         """Send an idle signal to the openai server."""
