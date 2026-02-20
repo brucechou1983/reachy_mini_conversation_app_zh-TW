@@ -69,7 +69,7 @@ class StoryBookGoToPage(Tool):
                 + (
                     " 這是最後一頁了，讀完之後可以問小朋友喜不喜歡這個故事，然後呼叫 story_book_close 關閉故事書。"
                     if is_last
-                    else " 讀完之後，呼叫 story_book_go_to_page 翻到下一頁。"
+                    else " 只要朗讀這一頁就好，不要呼叫任何工具，系統會自動翻頁。"
                 )
             ),
         }
