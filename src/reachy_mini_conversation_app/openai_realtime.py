@@ -59,6 +59,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         self.start_time = asyncio.get_event_loop().time()
         self.is_idle_tool_call = False
         self._story_reading_next_page: int | None = None  # auto-advance page tracker
+        self._story_done_countdown: int = 0  # response.done events to wait before auto-advance
         self.gradio_mode = gradio_mode
         self.instance_path = instance_path
         # Track how the API key was provided (env vs textbox) and its value
@@ -336,10 +337,14 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                     self.response_idle.set()
                     logger.debug("Response done")
 
-                    next_page = self._story_reading_next_page
-                    if next_page is not None:
-                        self._story_reading_next_page = None  # clear to prevent double-fire
-                        asyncio.create_task(self._story_auto_advance(next_page))
+                    # Countdown: wait for both tool-call response AND reading
+                    # response to finish before triggering auto-advance.
+                    if self._story_done_countdown > 0:
+                        self._story_done_countdown -= 1
+                        if self._story_done_countdown == 0 and self._story_reading_next_page is not None:
+                            next_page = self._story_reading_next_page
+                            self._story_reading_next_page = None
+                            asyncio.create_task(self._story_auto_advance(next_page))
 
                 # Handle partial transcription (user speaking in real-time)
                 if event.type == "conversation.item.input_audio_transcription.partial":
@@ -490,11 +495,15 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                     # if this tool call was triggered by an idle signal, don't make the robot speak
                     # for other tool calls, let the robot reply out loud
                     if tool_name == "story_book_go_to_page" and tool_result.get("status") == "ok":
-                        # Track next page for auto-advance
+                        # Track next page for auto-advance.
+                        # Countdown 2 = wait for (1) this tool-call response.done
+                        # + (2) the reading response.done before auto-advancing.
                         if tool_result.get("is_last_page"):
                             self._story_reading_next_page = None
+                            self._story_done_countdown = 0
                         else:
                             self._story_reading_next_page = tool_result["page"] + 1
+                            self._story_done_countdown = 2
 
                         await self.connection.response.create(
                             response={
@@ -503,6 +512,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                         )
                     elif tool_name == "story_book_close":
                         self._story_reading_next_page = None
+                        self._story_done_countdown = 0
                         await self.connection.response.create(
                             response={
                                 "instructions": "根據剛才工具回傳的結果，用簡短的口語回答。請使用台灣中文，語氣要適合跟小朋友說話。",
@@ -697,24 +707,26 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
             return fallback
 
     async def _story_auto_advance(self, next_page: int) -> None:
-        """Wait briefly, then inject a go-to-next-page command."""
-        await asyncio.sleep(2.0)  # brief pause between pages
+        """Wait for audio playback to finish, then inject a go-to-next-page command.
 
+        Called after the *reading* response.done (via countdown), so audio
+        generation is complete but the output queue may still contain buffered
+        audio chunks waiting to be played by the speaker.
+        """
         from reachy_mini_conversation_app.story_store import StoryStore
+
+        # Wait for the audio output queue to drain (= speaker finished playing)
+        drain_start = asyncio.get_event_loop().time()
+        while not self.output_queue.empty():
+            if asyncio.get_event_loop().time() - drain_start > 60.0:
+                return  # safety timeout
+            await asyncio.sleep(0.5)
+
+        await asyncio.sleep(1.5)  # brief pause between pages
 
         store = StoryStore.get()
         if not store.story or store.story.status != "reading":
             return  # story was closed or changed
-
-        # Wait for any in-progress response to finish
-        try:
-            await asyncio.wait_for(self.response_idle.wait(), timeout=15.0)
-        except asyncio.TimeoutError:
-            return
-
-        # Re-check after waiting
-        if not store.story or store.story.status != "reading":
-            return
 
         if not self.connection:
             return
