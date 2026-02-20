@@ -60,6 +60,8 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         self.is_idle_tool_call = False
         self._story_reading_next_page: int | None = None  # auto-advance page tracker
         self._story_done_countdown: int = 0  # response.done events to wait before auto-advance
+        self._story_audio_samples: int = 0  # total audio samples in current story reading
+        self._story_audio_start_ts: float | None = None  # timestamp of first audio delta
         self.gradio_mode = gradio_mode
         self.instance_path = instance_path
         # Track how the API key was provided (env vs textbox) and its value
@@ -344,6 +346,10 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                         if self._story_done_countdown == 0 and self._story_reading_next_page is not None:
                             next_page = self._story_reading_next_page
                             self._story_reading_next_page = None
+                            logger.info(
+                                "Story auto-advance: countdown done, audio=%.1fs, scheduling page %d",
+                                self._story_audio_samples / 24000.0, next_page,
+                            )
                             asyncio.create_task(self._story_auto_advance(next_page))
 
                 # Handle partial transcription (user speaking in real-time)
@@ -392,10 +398,16 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                         self.deps.head_wobbler.feed(event.delta)
                     self.last_activity_time = asyncio.get_event_loop().time()
                     logger.debug("last activity time updated to %s", self.last_activity_time)
+                    audio_bytes = base64.b64decode(event.delta)
+                    # Track audio samples during story reading for playback timing
+                    if self._story_done_countdown > 0:
+                        if self._story_audio_start_ts is None:
+                            self._story_audio_start_ts = asyncio.get_event_loop().time()
+                        self._story_audio_samples += len(audio_bytes) // 2
                     await self.output_queue.put(
                         (
                             self.output_sample_rate,
-                            np.frombuffer(base64.b64decode(event.delta), dtype=np.int16).reshape(1, -1),
+                            np.frombuffer(audio_bytes, dtype=np.int16).reshape(1, -1),
                         ),
                     )
 
@@ -504,6 +516,8 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                         else:
                             self._story_reading_next_page = tool_result["page"] + 1
                             self._story_done_countdown = 2
+                            self._story_audio_samples = 0
+                            self._story_audio_start_ts = None
 
                         await self.connection.response.create(
                             response={
@@ -709,18 +723,23 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
     async def _story_auto_advance(self, next_page: int) -> None:
         """Wait for audio playback to finish, then inject a go-to-next-page command.
 
-        Called after the *reading* response.done (via countdown), so audio
-        generation is complete but the output queue may still contain buffered
-        audio chunks waiting to be played by the speaker.
+        Uses tracked audio sample counts to estimate real playback duration.
+        Audio generation may finish before playback (streamed faster than
+        real-time), so we calculate how much playback time remains and sleep.
         """
         from reachy_mini_conversation_app.story_store import StoryStore
 
-        # Wait for the audio output queue to drain (= speaker finished playing)
-        drain_start = asyncio.get_event_loop().time()
-        while not self.output_queue.empty():
-            if asyncio.get_event_loop().time() - drain_start > 60.0:
-                return  # safety timeout
-            await asyncio.sleep(0.5)
+        # Estimate remaining playback time from tracked audio samples
+        if self._story_audio_start_ts is not None and self._story_audio_samples > 0:
+            total_duration = self._story_audio_samples / 24000.0
+            elapsed = asyncio.get_event_loop().time() - self._story_audio_start_ts
+            remaining = total_duration - elapsed
+            if remaining > 0:
+                logger.info(
+                    "Story auto-advance: waiting %.1fs for playback (total=%.1fs, elapsed=%.1fs)",
+                    remaining, total_duration, elapsed,
+                )
+                await asyncio.sleep(remaining)
 
         await asyncio.sleep(1.5)  # brief pause between pages
 
@@ -731,6 +750,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         if not self.connection:
             return
 
+        logger.info("Story auto-advance: advancing to page %d", next_page)
         await self.connection.conversation.item.create(
             item={
                 "type": "message",
