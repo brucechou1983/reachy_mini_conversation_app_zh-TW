@@ -733,15 +733,23 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         if self._story_audio_start_ts is not None and self._story_audio_samples > 0:
             total_duration = self._story_audio_samples / 24000.0
             elapsed = asyncio.get_event_loop().time() - self._story_audio_start_ts
-            remaining = total_duration - elapsed
-            if remaining > 0:
-                logger.info(
-                    "Story auto-advance: waiting %.1fs for playback (total=%.1fs, elapsed=%.1fs)",
-                    remaining, total_duration, elapsed,
-                )
-                await asyncio.sleep(remaining)
 
-        await asyncio.sleep(1.5)  # brief pause between pages
+            # IMPORTANT: Audio generation can be faster than real-time playback
+            # We must wait for the FULL duration, not just (duration - elapsed)
+            # because elapsed time tracks generation, not playback
+            actual_playback_wait = total_duration
+
+            # Add safety buffer for network/processing delays
+            safety_buffer = 1.0  # extra second to ensure playback completes
+            total_wait = actual_playback_wait + safety_buffer
+
+            logger.info(
+                "Story auto-advance: waiting %.1fs for playback (audio_duration=%.1fs, safety_buffer=%.1fs)",
+                total_wait, total_duration, safety_buffer,
+            )
+            await asyncio.sleep(total_wait)
+
+        await asyncio.sleep(2.0)  # pause between pages for better pacing
 
         store = StoryStore.get()
         if not store.story or store.story.status != "reading":

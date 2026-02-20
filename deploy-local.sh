@@ -13,7 +13,7 @@ if [[ ! -x "$PIP" ]]; then
 fi
 
 echo "Installing reachy_mini_conversation_app_zh_tw from $PROJECT_DIR ..."
-"$PIP" install --force-reinstall "$PROJECT_DIR"
+"$PIP" install --force-reinstall --no-deps "$PROJECT_DIR"
 
 # Patch the daemon dashboard's apps.js to fix the gear icon in WKWebView.
 # The native Reachy Mini Control app renders the dashboard in a WKWebView,
