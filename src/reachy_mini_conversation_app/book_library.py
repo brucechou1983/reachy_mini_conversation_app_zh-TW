@@ -29,6 +29,13 @@ class BookMeta:
         self.last_read_date = last_read_date
 
 
+def _validate_book_id(book_id: str) -> str:
+    """Raise ValueError if book_id contains path traversal components."""
+    if not book_id or ".." in book_id or "/" in book_id or "\\" in book_id or "\0" in book_id:
+        raise ValueError(f"invalid book id: {book_id!r}")
+    return book_id
+
+
 class BookLibrary:
     """Singleton persistent library for story books.
 
@@ -70,6 +77,7 @@ class BookLibrary:
         """Persist all pages of a completed story to disk."""
         from reachy_mini_conversation_app.story_store import Story  # noqa: F811
 
+        _validate_book_id(story.id)
         book_dir = self._books_dir / story.id
         book_dir.mkdir(parents=True, exist_ok=True)
 
@@ -98,15 +106,18 @@ class BookLibrary:
         return None
 
     def page_count(self, book_id: str) -> int:
+        _validate_book_id(book_id)
         d = self._books_dir / book_id
         if not d.exists():
             return 0
         return len([f for f in d.iterdir() if f.suffix == ".txt"])
 
     def book_dir(self, book_id: str) -> Path:
+        _validate_book_id(book_id)
         return self._books_dir / book_id
 
     def page_image_path(self, book_id: str, page: int) -> Optional[Path]:
+        _validate_book_id(book_id)
         d = self._books_dir / book_id
         for ext in ("png", "jpg", "jpeg"):
             p = d / f"page_{page}.{ext}"
@@ -115,12 +126,14 @@ class BookLibrary:
         return None
 
     def page_text(self, book_id: str, page: int) -> str:
+        _validate_book_id(book_id)
         p = self._books_dir / book_id / f"page_{page}.txt"
         if p.exists():
             return p.read_text(encoding="utf-8")
         return ""
 
     def update_last_read(self, book_id: str) -> None:
+        _validate_book_id(book_id)
         with self._rw_lock:
             rows = self._read_csv_unlocked()
             now = datetime.now(timezone.utc).isoformat()
@@ -130,6 +143,7 @@ class BookLibrary:
             self._write_csv_unlocked(rows)
 
     def delete_book(self, book_id: str) -> bool:
+        _validate_book_id(book_id)
         with self._rw_lock:
             rows = self._read_csv_unlocked()
             new_rows = [r for r in rows if r.id != book_id]

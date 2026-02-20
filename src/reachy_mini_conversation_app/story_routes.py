@@ -12,7 +12,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse, JSONResponse, Response
 
-from .book_library import BookLibrary
+from .book_library import BookLibrary, _validate_book_id
 from .story_store import StoryStore
 
 logger = logging.getLogger(__name__)
@@ -49,8 +49,15 @@ def mount_story_routes(app: FastAPI) -> None:
             })
         return JSONResponse(result)
 
+    def _check_book_id(book_id: str) -> None:
+        try:
+            _validate_book_id(book_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="invalid book id")
+
     @app.delete("/reader/api/books/{book_id}")
     def _delete_book(book_id: str) -> JSONResponse:
+        _check_book_id(book_id)
         library = BookLibrary.get()
         if not library.delete_book(book_id):
             raise HTTPException(status_code=404, detail="book not found")
@@ -58,6 +65,7 @@ def mount_story_routes(app: FastAPI) -> None:
 
     @app.get("/reader/api/books/{book_id}/download")
     def _download_book(book_id: str) -> StreamingResponse:
+        _check_book_id(book_id)
         library = BookLibrary.get()
         meta = library.get_book(book_id)
         if meta is None:
@@ -85,6 +93,7 @@ def mount_story_routes(app: FastAPI) -> None:
 
     @app.get("/reader/api/books/{book_id}")
     def _get_book_meta(book_id: str) -> JSONResponse:
+        _check_book_id(book_id)
         library = BookLibrary.get()
         meta = library.get_book(book_id)
         if meta is None:
@@ -99,6 +108,7 @@ def mount_story_routes(app: FastAPI) -> None:
 
     @app.get("/reader/api/books/{book_id}/pages/{page}")
     def _get_page(book_id: str, page: int) -> JSONResponse:
+        _check_book_id(book_id)
         library = BookLibrary.get()
         if library.get_book(book_id) is None:
             raise HTTPException(status_code=404, detail="book not found")
@@ -116,6 +126,7 @@ def mount_story_routes(app: FastAPI) -> None:
 
     @app.get("/reader/api/books/{book_id}/pages/{page}/image")
     def _get_page_image(book_id: str, page: int) -> Response:
+        _check_book_id(book_id)
         library = BookLibrary.get()
         img_path = library.page_image_path(book_id, page)
         if img_path is None:
@@ -125,6 +136,7 @@ def mount_story_routes(app: FastAPI) -> None:
 
     @app.post("/reader/api/books/{book_id}/last_read")
     def _update_last_read(book_id: str) -> JSONResponse:
+        _check_book_id(book_id)
         library = BookLibrary.get()
         library.update_last_read(book_id)
         return JSONResponse({"ok": True})
@@ -135,6 +147,7 @@ def mount_story_routes(app: FastAPI) -> None:
 
     @app.get("/reader/books/{book_id}")
     def _book_reader_page(book_id: str) -> FileResponse:
+        _check_book_id(book_id)
         return FileResponse(str(STATIC_DIR / "book_reader.html"))
 
     # ------------------------------------------------------------------ #

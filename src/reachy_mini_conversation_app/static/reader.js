@@ -2,6 +2,12 @@
   var grid = document.getElementById("book-grid");
   var emptyShelf = document.getElementById("empty-shelf");
 
+  function escapeHtml(str) {
+    var div = document.createElement("div");
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
   async function loadBookshelf() {
     try {
       var resp = await fetch("/reader/api/books");
@@ -25,19 +31,22 @@
       var card = document.createElement("div");
       card.className = "book-card";
 
+      var safeTitle = escapeHtml(book.title);
+      var safeId = encodeURIComponent(book.id);
+
       var coverHtml = book.cover_url
-        ? '<img class="book-cover" src="' + book.cover_url + '" alt="' + book.title + '" />'
+        ? '<img class="book-cover" src="' + book.cover_url + '" alt="' + safeTitle + '" />'
         : '<div class="book-cover-placeholder">📖</div>';
 
       card.innerHTML =
-        '<a href="/reader/books/' + book.id + '" class="book-cover-link">' +
+        '<a href="/reader/books/' + safeId + '" class="book-cover-link">' +
           coverHtml +
-          '<div class="book-title">' + book.title + "</div>" +
+          '<div class="book-title">' + safeTitle + "</div>" +
           '<div class="book-meta">' + book.page_count + " 頁</div>" +
         "</a>" +
         '<div class="book-card-actions">' +
-          '<a class="book-action-btn" href="/reader/api/books/' + book.id + '/download" title="下載">⬇</a>' +
-          '<button class="book-action-btn danger delete-book-btn" data-id="' + book.id + '" title="刪除">✕</button>' +
+          '<a class="book-action-btn" href="/reader/api/books/' + safeId + '/download" title="下載">⬇</a>' +
+          '<button class="book-action-btn danger delete-book-btn" data-id="' + safeId + '" title="刪除">✕</button>' +
         "</div>";
 
       grid.appendChild(card);
