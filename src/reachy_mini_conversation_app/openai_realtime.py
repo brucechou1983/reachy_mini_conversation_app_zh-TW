@@ -515,11 +515,10 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
 
                         # Track next page for auto-advance.
                         # Countdown 2 = wait for (1) this tool-call response.done
-                        # + (2) the reading response.done before auto-advancing.
-                        if tool_result.get("is_last_page"):
-                            self._story_reading_next_page = None
-                            self._story_done_countdown = 0
-                        else:
+                        # + (2) the reading response.done before advancing.
+                        # Last page: no auto-advance; story stays open until
+                        # the user asks to close it.
+                        if not tool_result.get("is_last_page"):
                             self._story_reading_next_page = tool_result["page"] + 1
                             self._story_done_countdown = 2
                             # Create the event now so play_loop can start
@@ -731,7 +730,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
             return fallback
 
     async def _story_auto_advance(self, next_page: int) -> None:
-        """Wait for audio playback to finish, then inject a go-to-next-page command.
+        """Wait for audio playback to finish, then advance to the next page.
 
         Uses an event-based approach: a sentinel is placed in the output queue
         after the last audio chunk.  When play_loop processes it (meaning all
@@ -752,12 +751,12 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         if not store.story or store.story.status != "reading":
             return  # story was closed or changed
 
+        if not self.connection:
+            return
+
         if store.story.current_page >= next_page:
             logger.info("Story auto-advance: page %d already reached (current=%d), skipping", next_page, store.story.current_page)
             return  # already advanced past this page
-
-        if not self.connection:
-            return
 
         logger.info("Story auto-advance: advancing to page %d", next_page)
         await self.connection.conversation.item.create(

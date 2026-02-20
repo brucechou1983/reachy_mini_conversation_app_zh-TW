@@ -66,10 +66,6 @@ class StoryBookGoToPage(Tool):
             "page_text": sp.text,
             "instruction": (
                 f"請用溫暖生動的語氣朗讀這一頁的故事內容給小朋友聽：「{sp.text}」"
-                + (
-                    " 這是最後一頁了，讀完之後可以問小朋友喜不喜歡這個故事，然後呼叫 story_book_close 關閉故事書。"
-                    if is_last
-                    else " 只要朗讀這一頁就好，不要呼叫任何工具，系統會自動翻頁。"
-                )
+                " 只要朗讀這一頁就好，不要呼叫任何工具，系統會自動翻頁。"
             ),
         }
