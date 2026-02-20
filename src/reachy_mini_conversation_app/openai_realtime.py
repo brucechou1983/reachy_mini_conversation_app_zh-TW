@@ -347,10 +347,9 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                         if self._story_done_countdown == 0 and self._story_reading_next_page is not None:
                             next_page = self._story_reading_next_page
                             self._story_reading_next_page = None
-                            # Put a sentinel event into the output queue.
+                            # Put a sentinel into the output queue.
                             # When play_loop processes it, all preceding audio
                             # chunks have been pushed to the media pipeline.
-                            self._story_playback_done = asyncio.Event()
                             await self.output_queue.put(AdditionalOutputs({"role": "story_audio_done"}))
                             logger.info(
                                 "Story auto-advance: audio generation done, scheduling page %d",
@@ -523,6 +522,9 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                         else:
                             self._story_reading_next_page = tool_result["page"] + 1
                             self._story_done_countdown = 2
+                            # Create the event now so play_loop can start
+                            # tracking audio push timing from the first chunk.
+                            self._story_playback_done = asyncio.Event()
 
                         await self.connection.response.create(
                             response={
