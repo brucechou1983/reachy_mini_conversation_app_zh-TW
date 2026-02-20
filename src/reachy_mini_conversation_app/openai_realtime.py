@@ -60,8 +60,9 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         self.is_idle_tool_call = False
         self._story_reading_next_page: int | None = None  # auto-advance page tracker
         self._story_done_countdown: int = 0  # response.done events to wait before auto-advance
-        self._story_audio_samples: int = 0  # total audio samples in current story reading
-        self._story_audio_start_ts: float | None = None  # timestamp of first audio delta
+        self._story_auto_advance_task: asyncio.Task | None = None  # current auto-advance task
+        self._story_playback_done: asyncio.Event | None = None  # set when all audio chunks have been pushed
+        self._story_playback_remaining: float = 0.0  # estimated remaining playback seconds when sentinel fires
         self.gradio_mode = gradio_mode
         self.instance_path = instance_path
         # Track how the API key was provided (env vs textbox) and its value
@@ -346,11 +347,16 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                         if self._story_done_countdown == 0 and self._story_reading_next_page is not None:
                             next_page = self._story_reading_next_page
                             self._story_reading_next_page = None
+                            # Put a sentinel event into the output queue.
+                            # When play_loop processes it, all preceding audio
+                            # chunks have been pushed to the media pipeline.
+                            self._story_playback_done = asyncio.Event()
+                            await self.output_queue.put(AdditionalOutputs({"role": "story_audio_done"}))
                             logger.info(
-                                "Story auto-advance: countdown done, audio=%.1fs, scheduling page %d",
-                                self._story_audio_samples / 24000.0, next_page,
+                                "Story auto-advance: audio generation done, scheduling page %d",
+                                next_page,
                             )
-                            asyncio.create_task(self._story_auto_advance(next_page))
+                            self._story_auto_advance_task = asyncio.create_task(self._story_auto_advance(next_page))
 
                 # Handle partial transcription (user speaking in real-time)
                 if event.type == "conversation.item.input_audio_transcription.partial":
@@ -399,11 +405,6 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                     self.last_activity_time = asyncio.get_event_loop().time()
                     logger.debug("last activity time updated to %s", self.last_activity_time)
                     audio_bytes = base64.b64decode(event.delta)
-                    # Track audio samples during story reading for playback timing
-                    if self._story_done_countdown > 0:
-                        if self._story_audio_start_ts is None:
-                            self._story_audio_start_ts = asyncio.get_event_loop().time()
-                        self._story_audio_samples += len(audio_bytes) // 2
                     await self.output_queue.put(
                         (
                             self.output_sample_rate,
@@ -507,6 +508,12 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                     # if this tool call was triggered by an idle signal, don't make the robot speak
                     # for other tool calls, let the robot reply out loud
                     if tool_name == "story_book_go_to_page" and tool_result.get("status") == "ok":
+                        # Cancel any pending auto-advance task to prevent duplicates.
+                        if self._story_auto_advance_task and not self._story_auto_advance_task.done():
+                            self._story_auto_advance_task.cancel()
+                            logger.info("Story auto-advance: cancelled pending task")
+                        self._story_auto_advance_task = None
+
                         # Track next page for auto-advance.
                         # Countdown 2 = wait for (1) this tool-call response.done
                         # + (2) the reading response.done before auto-advancing.
@@ -516,8 +523,6 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                         else:
                             self._story_reading_next_page = tool_result["page"] + 1
                             self._story_done_countdown = 2
-                            self._story_audio_samples = 0
-                            self._story_audio_start_ts = None
 
                         await self.connection.response.create(
                             response={
@@ -525,6 +530,9 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                             },
                         )
                     elif tool_name == "story_book_close":
+                        if self._story_auto_advance_task and not self._story_auto_advance_task.done():
+                            self._story_auto_advance_task.cancel()
+                        self._story_auto_advance_task = None
                         self._story_reading_next_page = None
                         self._story_done_countdown = 0
                         await self.connection.response.create(
@@ -723,37 +731,28 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
     async def _story_auto_advance(self, next_page: int) -> None:
         """Wait for audio playback to finish, then inject a go-to-next-page command.
 
-        Uses tracked audio sample counts to estimate real playback duration.
-        Audio generation may finish before playback (streamed faster than
-        real-time), so we calculate how much playback time remains and sleep.
+        Uses an event-based approach: a sentinel is placed in the output queue
+        after the last audio chunk.  When play_loop processes it (meaning all
+        preceding audio has been pushed to the media pipeline), the event is
+        set and we advance.
         """
         from reachy_mini_conversation_app.story_store import StoryStore
 
-        # Estimate remaining playback time from tracked audio samples
-        if self._story_audio_start_ts is not None and self._story_audio_samples > 0:
-            total_duration = self._story_audio_samples / 24000.0
-            elapsed = asyncio.get_event_loop().time() - self._story_audio_start_ts
-
-            # IMPORTANT: Audio generation can be faster than real-time playback
-            # We must wait for the FULL duration, not just (duration - elapsed)
-            # because elapsed time tracks generation, not playback
-            actual_playback_wait = total_duration
-
-            # Add safety buffer for network/processing delays
-            safety_buffer = 1.0  # extra second to ensure playback completes
-            total_wait = actual_playback_wait + safety_buffer
-
-            logger.info(
-                "Story auto-advance: waiting %.1fs for playback (audio_duration=%.1fs, safety_buffer=%.1fs)",
-                total_wait, total_duration, safety_buffer,
-            )
-            await asyncio.sleep(total_wait)
-
-        await asyncio.sleep(2.0)  # pause between pages for better pacing
+        # Wait until all audio chunks have been pushed to the media pipeline.
+        if self._story_playback_done is not None:
+            logger.info("Story auto-advance: waiting for audio push to finish for page %d", next_page)
+            await self._story_playback_done.wait()
+            remaining = self._story_playback_remaining + 2.0  # buffer for media pipeline drain
+            logger.info("Story auto-advance: all chunks pushed, waiting %.1fs for remaining playback + buffer", remaining)
+            await asyncio.sleep(remaining)
 
         store = StoryStore.get()
         if not store.story or store.story.status != "reading":
             return  # story was closed or changed
+
+        if store.story.current_page >= next_page:
+            logger.info("Story auto-advance: page %d already reached (current=%d), skipping", next_page, store.story.current_page)
+            return  # already advanced past this page
 
         if not self.connection:
             return
