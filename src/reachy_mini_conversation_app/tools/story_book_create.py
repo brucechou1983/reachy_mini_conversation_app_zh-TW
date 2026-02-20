@@ -124,8 +124,17 @@ async def _generate_story(story_id: str, theme: str, handler: Any) -> None:
         store.set_story_ready(story_id, pages)
         logger.info("Story '%s' is ready with %d pages", theme, len(pages))
 
+        # Persist to disk library (use captured reference to avoid race with close_story)
+        current_story = store.story
+        if current_story and current_story.id == story_id:
+            try:
+                from reachy_mini_conversation_app.book_library import BookLibrary
+                BookLibrary.get().save_book(current_story)
+            except Exception as e:
+                logger.warning("Failed to save book to library: %s", e)
+
         # Auto-open reader in browser
-        webbrowser.open("http://localhost:7860/reader")
+        webbrowser.open(f"http://localhost:7860/reader/books/{story_id}")
 
         # Step 4: Notify the robot via conversation injection
         if handler and getattr(handler, "connection", None):

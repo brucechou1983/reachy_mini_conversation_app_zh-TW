@@ -3,41 +3,19 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>故事書 - Reachy Mini</title>
+    <title>故事書架 - Reachy Mini</title>
     <link rel="stylesheet" href="/static/reader.css" />
   </head>
   <body>
-    <div id="loading-screen" class="screen active">
-      <div class="book-icon">📖</div>
-      <h1>故事書準備中...</h1>
-      <p id="loading-title"></p>
-      <div class="loading-dots"><span></span><span></span><span></span></div>
-    </div>
-
-    <div id="reader-screen" class="screen">
-      <div class="page-container">
-        <div class="illustration">
-          <img id="page-image" src="" alt="故事插畫" />
-        </div>
-        <div class="text-area">
-          <p id="page-text"></p>
-        </div>
-        <div class="page-indicator">
-          <span id="page-num">1</span> / <span id="page-total">8</span>
-        </div>
+    <div id="bookshelf-screen" class="screen active">
+      <header class="shelf-header">
+        <div class="book-icon">📚</div>
+        <h1>故事書架</h1>
+      </header>
+      <div id="book-grid" class="book-grid"></div>
+      <div id="empty-shelf" class="empty-shelf hidden">
+        <p>書架是空的，讓 Reachy Mini 幫你創作第一本故事書吧！</p>
       </div>
-    </div>
-
-    <div id="end-screen" class="screen">
-      <div class="book-icon">🎉</div>
-      <h1>故事結束了！</h1>
-      <p>謝謝你聽完這個故事</p>
-    </div>
-
-    <div id="error-screen" class="screen">
-      <div class="book-icon">⚠️</div>
-      <h1>發生錯誤</h1>
-      <p id="error-message">無法連線到伺服器</p>
     </div>
 
     <script src="/static/reader.js"></script>

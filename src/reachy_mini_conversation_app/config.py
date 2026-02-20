@@ -30,6 +30,7 @@ class Config:
     HF_TOKEN = os.getenv("HF_TOKEN")  # Optional, falls back to hf auth login if not set
     TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")  # Optional, enables web_search tool
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")  # Optional, enables story_book tools
+    STORY_BOOKS_DIR = os.getenv("STORY_BOOKS_DIR")  # Optional, defaults to ~/.reachy_mini/books/
 
     logger.debug(f"Model: {MODEL_NAME}, HF_HOME: {HF_HOME}, Vision Model: {LOCAL_VISION_MODEL}")
 

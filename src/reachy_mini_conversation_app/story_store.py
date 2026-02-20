@@ -93,6 +93,16 @@ class StoryStore:
         })
         return sp
 
+    def load_story(self, story: Story) -> None:
+        """Load a pre-built story (e.g. from disk) without broadcasting 'generating'."""
+        self._story = story
+        self._broadcast({
+            "event": "story_ready",
+            "story_id": story.id,
+            "title": story.title,
+            "page_count": len(story.pages),
+        })
+
     def close_story(self) -> None:
         if self._story:
             self._story.status = "closed"
