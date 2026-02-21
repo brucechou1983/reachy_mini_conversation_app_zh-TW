@@ -14,6 +14,10 @@ tags:
 
 # Reachy Mini 台灣中文對話程式（兒童版）
 
+<p align="center">
+  <img src="docs/assets/taiwan_banner.png" alt="Reachy Mini x 台灣" width="600"/>
+</p>
+
 Reachy Mini 機器人的對話應用程式，結合 OpenAI 即時語音 API、視覺處理管線、編排動作庫，以及由 Google Gemini 驅動的互動說故事功能。
 
 > **分支聲明**
