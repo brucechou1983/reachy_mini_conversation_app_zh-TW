@@ -81,10 +81,19 @@ def mount_story_routes(app: FastAPI) -> None:
 
         safe_title = "".join(c for c in meta.title if c.isalnum() or c in " _-")[:40]
         filename = f"{safe_title or book_id}.zip"
+        # Use RFC 5987 encoding for non-ASCII filenames
+        ascii_fallback = f"{book_id}.zip"
+        from urllib.parse import quote
+        encoded_filename = quote(filename)
         return StreamingResponse(
             buf,
             media_type="application/zip",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            headers={
+                "Content-Disposition": (
+                    f'attachment; filename="{ascii_fallback}"; '
+                    f"filename*=UTF-8''{encoded_filename}"
+                ),
+            },
         )
 
     # ------------------------------------------------------------------ #

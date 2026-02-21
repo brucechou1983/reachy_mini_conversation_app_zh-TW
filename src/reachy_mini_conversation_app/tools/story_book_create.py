@@ -210,6 +210,10 @@ async def _generate_story_text(api_key: str, theme: str) -> list[str] | None:
         await client.aio.aclose()
 
 
+_IMAGE_GEN_MAX_RETRIES = 3
+_IMAGE_GEN_RETRY_DELAY = 2.0
+
+
 async def _generate_illustration(
     api_key: str, theme: str, page_text: str, page_num: int, total_pages: int
 ) -> tuple[str, str]:
@@ -222,53 +226,73 @@ async def _generate_illustration(
         "picture book art style. No text or words in the image."
     )
 
-    client = _make_client(api_key, timeout=120_000)
-    try:
-        response = await client.aio.models.generate_content(
-            model=GEMINI_IMAGE_MODEL,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                response_modalities=["TEXT", "IMAGE"],
-                safety_settings=[
-                    types.SafetySetting(
-                        category="HARM_CATEGORY_DANGEROUS_CONTENT",
-                        threshold="BLOCK_ONLY_HIGH",
-                    ),
-                    types.SafetySetting(
-                        category="HARM_CATEGORY_HARASSMENT",
-                        threshold="BLOCK_ONLY_HIGH",
-                    ),
-                    types.SafetySetting(
-                        category="HARM_CATEGORY_HATE_SPEECH",
-                        threshold="BLOCK_ONLY_HIGH",
-                    ),
-                    types.SafetySetting(
-                        category="HARM_CATEGORY_SEXUALLY_EXPLICIT",
-                        threshold="BLOCK_ONLY_HIGH",
-                    ),
-                ],
-            ),
-        )
+    for attempt in range(1, _IMAGE_GEN_MAX_RETRIES + 1):
+        client = _make_client(api_key, timeout=120_000)
+        try:
+            response = await client.aio.models.generate_content(
+                model=GEMINI_IMAGE_MODEL,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_modalities=["TEXT", "IMAGE"],
+                    safety_settings=[
+                        types.SafetySetting(
+                            category="HARM_CATEGORY_DANGEROUS_CONTENT",
+                            threshold="BLOCK_ONLY_HIGH",
+                        ),
+                        types.SafetySetting(
+                            category="HARM_CATEGORY_HARASSMENT",
+                            threshold="BLOCK_ONLY_HIGH",
+                        ),
+                        types.SafetySetting(
+                            category="HARM_CATEGORY_HATE_SPEECH",
+                            threshold="BLOCK_ONLY_HIGH",
+                        ),
+                        types.SafetySetting(
+                            category="HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                            threshold="BLOCK_ONLY_HIGH",
+                        ),
+                    ],
+                ),
+            )
 
-        # Extract image from response parts
-        if response.candidates:
-            candidate = response.candidates[0]
-            if candidate.content and candidate.content.parts:
-                for part in candidate.content.parts:
-                    if part.inline_data is not None:
-                        mime = part.inline_data.mime_type or "image/png"
-                        image_bytes = part.inline_data.data
-                        image_b64 = base64.b64encode(image_bytes).decode("ascii")
-                        return image_b64, mime
+            # Extract image from response parts
+            if response.candidates:
+                candidate = response.candidates[0]
+                if candidate.content and candidate.content.parts:
+                    for part in candidate.content.parts:
+                        if part.inline_data is not None:
+                            mime = part.inline_data.mime_type or "image/png"
+                            image_bytes = part.inline_data.data
+                            image_b64 = base64.b64encode(image_bytes).decode("ascii")
+                            return image_b64, mime
 
-        logger.warning(
-            "No image data in Gemini response for page %d/%d",
-            page_num, total_pages,
-        )
-        return "", "image/png"
+            if attempt < _IMAGE_GEN_MAX_RETRIES:
+                logger.warning(
+                    "No image data in Gemini response for page %d/%d (attempt %d/%d), retrying...",
+                    page_num, total_pages, attempt, _IMAGE_GEN_MAX_RETRIES,
+                )
+                await asyncio.sleep(_IMAGE_GEN_RETRY_DELAY * attempt)
+            else:
+                logger.warning(
+                    "No image data in Gemini response for page %d/%d after %d attempts",
+                    page_num, total_pages, _IMAGE_GEN_MAX_RETRIES,
+                )
+                return "", "image/png"
 
-    except Exception as e:
-        logger.error("Gemini image generation failed for page %d/%d: %s", page_num, total_pages, e)
-        return "", "image/png"
-    finally:
-        await client.aio.aclose()
+        except Exception as e:
+            if attempt < _IMAGE_GEN_MAX_RETRIES:
+                logger.warning(
+                    "Gemini image generation failed for page %d/%d (attempt %d/%d): %s, retrying...",
+                    page_num, total_pages, attempt, _IMAGE_GEN_MAX_RETRIES, e,
+                )
+                await asyncio.sleep(_IMAGE_GEN_RETRY_DELAY * attempt)
+            else:
+                logger.error(
+                    "Gemini image generation failed for page %d/%d after %d attempts: %s",
+                    page_num, total_pages, _IMAGE_GEN_MAX_RETRIES, e,
+                )
+                return "", "image/png"
+        finally:
+            await client.aio.aclose()
+
+    return "", "image/png"
