@@ -45,24 +45,11 @@ Reachy Mini 機器人的對話應用程式，結合 OpenAI 即時語音 API、�
 
 ## 快速上手
 
-### 1. 安裝
+### 1. 取得應用程式
 
-> [!IMPORTANT]
-> 使用前請先安裝 [Reachy Mini SDK](https://github.com/pollen-robotics/reachy_mini/)。
+透過 [Reachy Mini Desktop App](https://github.com/pollen-robotics/reachy-mini-desktop-app) 搜尋 `reachy_mini_conversation_app_zh-TW`，即可一鍵安裝本應用程式。
 
-```bash
-uv venv --python 3.12.1
-source .venv/bin/activate
-uv sync
-```
-
-### 2. 設定
-
-將 `.env.example` 複製為 `.env`，填入必要的金鑰：
-
-```bash
-cp .env.example .env
-```
+### 2. 基本設定
 
 | 變數 | 必填 | 說明 |
 |------|:----:|------|
@@ -70,25 +57,10 @@ cp .env.example .env
 | `GEMINI_API_KEY` | 選填 | 互動說故事功能所需（[取得](https://aistudio.google.com)） |
 | `TAVILY_API_KEY` | 選填 | 網路搜尋功能所需（[取得](https://tavily.com)） |
 
-### 3. 啟動
 
-```bash
-# 基本啟動（console 模式）
-reachy-mini-conversation-app-zh-tw
+### 3. 故事閱讀器
 
-# 使用 Gradio 網頁介面（模擬模式下必須使用）
-reachy-mini-conversation-app-zh-tw --gradio
-
-# 使用 MediaPipe 臉部追蹤
-reachy-mini-conversation-app-zh-tw --head-tracker mediapipe
-
-# 純語音對話（停用相機）
-reachy-mini-conversation-app-zh-tw --no-camera
-```
-
-### 4. 故事閱讀器
-
-啟動後在平板或第二螢幕開啟 `http://127.0.0.1:7860/reader`，即可看到繪本故事的即時顯示。
+啟動後請汪汪開啟故事書，或是手動打開 `http://127.0.0.1:7860/reader`，即可看到你的繪本。
 
 ---
 
