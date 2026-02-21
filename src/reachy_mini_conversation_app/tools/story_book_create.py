@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 GEMINI_TEXT_MODEL = "gemini-2.5-flash"
 GEMINI_IMAGE_MODEL = "gemini-2.5-flash-image"
-NUM_PAGES = 8
+DEFAULT_NUM_PAGES = 12
 
 # Retry configuration for Gemini API calls
 _RETRY_OPTIONS = types.HttpRetryOptions(
@@ -58,6 +58,13 @@ class StoryBookCreate(Tool):
                 "type": "string",
                 "description": "故事的主題或題材，例如「勇敢的小兔子冒險記」",
             },
+            "num_pages": {
+                "type": "integer",
+                "description": "故事的頁數，預設為 12 頁",
+                "default": DEFAULT_NUM_PAGES,
+                "minimum": 4,
+                "maximum": 99,
+            },
         },
         "required": ["theme"],
     }
@@ -68,7 +75,9 @@ class StoryBookCreate(Tool):
 
     async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
         theme = kwargs.get("theme", "一個有趣的故事")
-        logger.info("story_book_create called with theme: %s", theme)
+        num_pages = kwargs.get("num_pages", DEFAULT_NUM_PAGES)
+        num_pages = max(4, min(99, int(num_pages)))
+        logger.info("story_book_create called with theme: %s, num_pages: %d", theme, num_pages)
 
         store = StoryStore.get()
 
@@ -83,7 +92,7 @@ class StoryBookCreate(Tool):
 
         # Launch background generation (keep reference to avoid silent exception loss)
         handler = deps.realtime_handler
-        task = asyncio.create_task(_generate_story(story.id, theme, handler))
+        task = asyncio.create_task(_generate_story(story.id, theme, num_pages, handler))
         task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
 
         return {
@@ -93,7 +102,7 @@ class StoryBookCreate(Tool):
         }
 
 
-async def _generate_story(story_id: str, theme: str, handler: Any) -> None:
+async def _generate_story(story_id: str, theme: str, num_pages: int, handler: Any) -> None:
     """Background task: generate story text + images via Gemini API."""
     api_key = getattr(config, "GEMINI_API_KEY", None)
     if not api_key:
@@ -104,7 +113,7 @@ async def _generate_story(story_id: str, theme: str, handler: Any) -> None:
 
     try:
         # Step 1: Generate story text
-        story_pages_text = await _generate_story_text(api_key, theme)
+        story_pages_text = await _generate_story_text(api_key, theme, num_pages)
         if not story_pages_text:
             logger.error("Failed to generate story text")
             if store.story and store.story.id == story_id:
@@ -172,10 +181,10 @@ async def _generate_story(story_id: str, theme: str, handler: Any) -> None:
             store.close_story()
 
 
-async def _generate_story_text(api_key: str, theme: str) -> list[str] | None:
+async def _generate_story_text(api_key: str, theme: str, num_pages: int = DEFAULT_NUM_PAGES) -> list[str] | None:
     """Generate story text via Gemini API, returning a list of page texts."""
     prompt = (
-        f"你是一位專門為4到7歲小朋友寫故事的作家。請用台灣繁體中文，為以下主題寫一本 {NUM_PAGES} 頁的故事書。\n\n"
+        f"你是一位專門為4到7歲小朋友寫故事的作家。請用台灣繁體中文，為以下主題寫一本 {num_pages} 頁的故事書。\n\n"
         f"主題：{theme}\n\n"
         "要求：\n"
         "1. 每頁的文字要簡短（2-4句話），適合小朋友聽。\n"
@@ -199,8 +208,8 @@ async def _generate_story_text(api_key: str, theme: str) -> list[str] | None:
         text = response.text
         parsed = json.loads(text)
         pages = parsed.get("pages", [])
-        if len(pages) != NUM_PAGES:
-            logger.warning("Expected %d pages, got %d", NUM_PAGES, len(pages))
+        if len(pages) != num_pages:
+            logger.warning("Expected %d pages, got %d", num_pages, len(pages))
         return pages if pages else None
 
     except Exception as e:
