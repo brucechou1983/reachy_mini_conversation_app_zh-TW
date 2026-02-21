@@ -335,6 +335,61 @@ async function init() {
     }
   });
 
+  // --- Gemini panel ---
+  const geminiPanel = document.getElementById("gemini-panel");
+  const geminiChip = document.getElementById("gemini-chip");
+  const geminiKey = document.getElementById("gemini-key");
+  const geminiSaveBtn = document.getElementById("gemini-save-btn");
+  const geminiStatus = document.getElementById("gemini-status");
+
+  show(geminiPanel, true);
+
+  // Check if Gemini key is already configured
+  try {
+    const geminiResp = await fetchWithTimeout("/gemini_status", {}, 2000);
+    if (geminiResp.ok) {
+      const geminiData = await geminiResp.json();
+      if (geminiData.has_key) {
+        geminiChip.textContent = "Configured";
+        geminiChip.className = "chip chip-ok";
+        geminiStatus.textContent = "Gemini API key is set. story_book tools are enabled.";
+        geminiStatus.className = "status ok";
+      }
+    }
+  } catch (e) {}
+
+  geminiSaveBtn.addEventListener("click", async () => {
+    const key = geminiKey.value.trim();
+    if (!key) {
+      geminiStatus.textContent = "Please enter a key.";
+      geminiStatus.className = "status warn";
+      return;
+    }
+    geminiStatus.textContent = "Saving...";
+    geminiStatus.className = "status";
+    try {
+      const resp = await fetch("/gemini_api_key", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (resp.ok && data.ok) {
+        geminiStatus.textContent = "Saved. story_book tools will be available on next session.";
+        geminiStatus.className = "status ok";
+        geminiChip.textContent = "Configured";
+        geminiChip.className = "chip chip-ok";
+        geminiKey.value = "";
+      } else {
+        geminiStatus.textContent = data.error || "Failed to save.";
+        geminiStatus.className = "status error";
+      }
+    } catch (e) {
+      geminiStatus.textContent = "Failed to save key.";
+      geminiStatus.className = "status error";
+    }
+  });
+
   // Wait until backend routes are ready before rendering personalities UI
   const list = (await waitForPersonalityData()) || { choices: [] };
   statusEl.textContent = "";

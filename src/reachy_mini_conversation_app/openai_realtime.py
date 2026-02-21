@@ -58,6 +58,11 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         self.last_activity_time = asyncio.get_event_loop().time()
         self.start_time = asyncio.get_event_loop().time()
         self.is_idle_tool_call = False
+        self._story_reading_next_page: int | None = None  # auto-advance page tracker
+        self._story_done_countdown: int = 0  # response.done events to wait before auto-advance
+        self._story_auto_advance_task: asyncio.Task | None = None  # current auto-advance task
+        self._story_playback_done: asyncio.Event | None = None  # set when all audio chunks have been pushed
+        self._story_playback_remaining: float = 0.0  # estimated remaining playback seconds when sentinel fires
         self._tool_executing = False  # mute mic during tool calls to prevent VAD
         self.gradio_mode = gradio_mode
         self.instance_path = instance_path
@@ -73,6 +78,10 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         # Internal lifecycle flags
         self._shutdown_requested: bool = False
         self._connected_event: asyncio.Event = asyncio.Event()
+
+        # Track whether a response is currently in progress (set=idle, clear=busy)
+        self.response_idle: asyncio.Event = asyncio.Event()
+        self.response_idle.set()  # starts idle
 
     def copy(self) -> "OpenaiRealtimeHandler":
         """Create a copy of the handler."""
@@ -324,11 +333,30 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                     logger.debug("response completed")
 
                 if event.type == "response.created":
+                    self.response_idle.clear()
                     logger.debug("Response created")
 
                 if event.type == "response.done":
                     # Doesn't mean the audio is done playing
+                    self.response_idle.set()
                     logger.debug("Response done")
+
+                    # Countdown: wait for both tool-call response AND reading
+                    # response to finish before triggering auto-advance.
+                    if self._story_done_countdown > 0:
+                        self._story_done_countdown -= 1
+                        if self._story_done_countdown == 0 and self._story_reading_next_page is not None:
+                            next_page = self._story_reading_next_page
+                            self._story_reading_next_page = None
+                            # Put a sentinel into the output queue.
+                            # When play_loop processes it, all preceding audio
+                            # chunks have been pushed to the media pipeline.
+                            await self.output_queue.put(AdditionalOutputs({"role": "story_audio_done"}))
+                            logger.info(
+                                "Story auto-advance: audio generation done, scheduling page %d",
+                                next_page,
+                            )
+                            self._story_auto_advance_task = asyncio.create_task(self._story_auto_advance(next_page))
 
                 # Handle partial transcription (user speaking in real-time)
                 if event.type == "conversation.item.input_audio_transcription.partial":
@@ -376,10 +404,11 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                         self.deps.head_wobbler.feed(event.delta)
                     self.last_activity_time = asyncio.get_event_loop().time()
                     logger.debug("last activity time updated to %s", self.last_activity_time)
+                    audio_bytes = base64.b64decode(event.delta)
                     await self.output_queue.put(
                         (
                             self.output_sample_rate,
-                            np.frombuffer(base64.b64decode(event.delta), dtype=np.int16).reshape(1, -1),
+                            np.frombuffer(audio_bytes, dtype=np.int16).reshape(1, -1),
                         ),
                     )
 
@@ -483,7 +512,42 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
 
                     # if this tool call was triggered by an idle signal, don't make the robot speak
                     # for other tool calls, let the robot reply out loud
-                    if self.is_idle_tool_call:
+                    if tool_name == "story_book_go_to_page" and tool_result.get("status") == "ok":
+                        # Cancel any pending auto-advance task to prevent duplicates.
+                        if self._story_auto_advance_task and not self._story_auto_advance_task.done():
+                            self._story_auto_advance_task.cancel()
+                            logger.info("Story auto-advance: cancelled pending task")
+                        self._story_auto_advance_task = None
+
+                        # Track next page for auto-advance.
+                        # Countdown 2 = wait for (1) this tool-call response.done
+                        # + (2) the reading response.done before advancing.
+                        # Last page: no auto-advance; story stays open until
+                        # the user asks to close it.
+                        if not tool_result.get("is_last_page"):
+                            self._story_reading_next_page = tool_result["page"] + 1
+                            self._story_done_countdown = 2
+                            # Create the event now so play_loop can start
+                            # tracking audio push timing from the first chunk.
+                            self._story_playback_done = asyncio.Event()
+
+                        await self.connection.response.create(
+                            response={
+                                "instructions": tool_result.get("instruction", ""),
+                            },
+                        )
+                    elif tool_name == "story_book_close":
+                        if self._story_auto_advance_task and not self._story_auto_advance_task.done():
+                            self._story_auto_advance_task.cancel()
+                        self._story_auto_advance_task = None
+                        self._story_reading_next_page = None
+                        self._story_done_countdown = 0
+                        await self.connection.response.create(
+                            response={
+                                "instructions": "根據剛才工具回傳的結果，用簡短的口語回答。請使用台灣中文，語氣要適合跟小朋友說話。",
+                            },
+                        )
+                    elif self.is_idle_tool_call:
                         self.is_idle_tool_call = False
                     else:
                         logger.info("Requesting verbal response after tool '%s'", tool_name)
@@ -677,6 +741,53 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
             return voices
         except Exception:
             return fallback
+
+    async def _story_auto_advance(self, next_page: int) -> None:
+        """Wait for audio playback to finish, then advance to the next page.
+
+        Uses an event-based approach: a sentinel is placed in the output queue
+        after the last audio chunk.  When play_loop processes it (meaning all
+        preceding audio has been pushed to the media pipeline), the event is
+        set and we advance.
+        """
+        from reachy_mini_conversation_app.story_store import StoryStore
+
+        # Wait until all audio chunks have been pushed to the media pipeline.
+        if self._story_playback_done is not None:
+            logger.info("Story auto-advance: waiting for audio push to finish for page %d", next_page)
+            await self._story_playback_done.wait()
+            remaining = self._story_playback_remaining + 2.0  # buffer for media pipeline drain
+            logger.info("Story auto-advance: all chunks pushed, waiting %.1fs for remaining playback + buffer", remaining)
+            await asyncio.sleep(remaining)
+
+        store = StoryStore.get()
+        if not store.story or store.story.status != "reading":
+            return  # story was closed or changed
+
+        if not self.connection:
+            return
+
+        if store.story.current_page >= next_page:
+            logger.info("Story auto-advance: page %d already reached (current=%d), skipping", next_page, store.story.current_page)
+            return  # already advanced past this page
+
+        # Wait for any in-progress response to finish before creating a new one.
+        await self.response_idle.wait()
+
+        logger.info("Story auto-advance: advancing to page %d", next_page)
+        await self.connection.conversation.item.create(
+            item={
+                "type": "message",
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": f"[系統: 請呼叫 story_book_go_to_page(page={next_page}) 翻到下一頁繼續朗讀故事。]",
+                    }
+                ],
+            },
+        )
+        await self.connection.response.create()
 
     async def send_idle_signal(self, idle_duration: float) -> None:
         """Send an idle signal to the openai server."""

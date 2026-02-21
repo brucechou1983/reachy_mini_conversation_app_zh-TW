@@ -66,6 +66,23 @@
         </div>
       </div>
 
+      <div id="gemini-panel" class="panel hidden">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Optional</p>
+            <h2>Story Book (Gemini)</h2>
+          </div>
+          <span id="gemini-chip" class="chip">Not set</span>
+        </div>
+        <p class="muted">Add a Gemini API key to enable the <code>story_book</code> tools. Get one free at <a href="https://aistudio.google.com" target="_blank">aistudio.google.com</a>.</p>
+        <label for="gemini-key">Gemini API Key</label>
+        <input id="gemini-key" type="password" placeholder="AIza..." autocomplete="off" />
+        <div class="actions">
+          <button id="gemini-save-btn" class="ghost">Save key</button>
+          <p id="gemini-status" class="status"></p>
+        </div>
+      </div>
+
       <div id="personality-panel" class="panel hidden">
         <div class="panel-heading">
           <div>
