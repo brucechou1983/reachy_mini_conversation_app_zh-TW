@@ -51,6 +51,8 @@ from reachy_mini.utils.interpolation import (
     linear_pose_interpolation,
 )
 
+from reachy_mini_conversation_app.dance_emotion_moves import GotoQueueMove
+
 
 logger = logging.getLogger(__name__)
 
@@ -276,6 +278,8 @@ class MovementManager:
         self._antenna_blend_duration = 0.4  # seconds to blend back after listening
         self._last_listening_blend_time = self._now()
         self._breathing_active = False  # true when breathing move is running or queued
+        self._is_frozen = False  # true during photo capture freeze
+        self._freeze_settled_event = threading.Event()
         self._listening_debounce_s = 0.15
         self._last_listening_toggle_time = self._now()
         self._last_set_target_err = 0.0
@@ -372,6 +376,29 @@ class MovementManager:
                 return
         self._command_queue.put(("set_listening", listening))
 
+    def freeze(self, goto_duration: float = 0.5, timeout: float = 3.0) -> bool:
+        """Smoothly move to neutral and freeze all motion. Blocks until settled.
+
+        Thread-safe: posts a command to the worker queue, then waits for the
+        worker to signal that the GotoQueueMove to neutral has completed.
+        The event is cleared inside the worker's command handler (not here)
+        to avoid a TOCTOU race with the settle detection.
+
+        Returns True if settled before timeout, False otherwise.
+        """
+        self._command_queue.put(("freeze", goto_duration))
+        settled = self._freeze_settled_event.wait(timeout=timeout)
+        if not settled:
+            logger.warning("freeze() timed out waiting for robot to reach neutral")
+        return settled
+
+    def unfreeze(self) -> None:
+        """Release freeze; normal motion resumes.
+
+        Thread-safe: posted to the worker command queue.
+        """
+        self._command_queue.put(("unfreeze", None))
+
     def _poll_signals(self, current_time: float) -> None:
         """Apply queued commands and pending offset updates."""
         self._apply_pending_offsets()
@@ -391,7 +418,7 @@ class MovementManager:
                 speech_offsets = self._pending_speech_offsets
                 self._speech_offsets_dirty = False
 
-        if speech_offsets is not None:
+        if speech_offsets is not None and not self._is_frozen:
             self.state.speech_offsets = speech_offsets
             self.state.update_activity()
 
@@ -401,9 +428,16 @@ class MovementManager:
                 face_offsets = self._pending_face_offsets
                 self._face_offsets_dirty = False
 
-        if face_offsets is not None:
+        if face_offsets is not None and not self._is_frozen:
             self.state.face_tracking_offsets = face_offsets
             self.state.update_activity()
+
+    def _clear_queue_state(self) -> None:
+        """Clear the move queue and stop the current move."""
+        self.move_queue.clear()
+        self.state.current_move = None
+        self.state.move_start_time = None
+        self._breathing_active = False
 
     def _handle_command(self, command: str, payload: Any, current_time: float) -> None:
         """Handle a single cross-thread command."""
@@ -427,10 +461,7 @@ class MovementManager:
             else:
                 logger.warning("Ignored queue_move command with invalid payload: %s", payload)
         elif command == "clear_queue":
-            self.move_queue.clear()
-            self.state.current_move = None
-            self.state.move_start_time = None
-            self._breathing_active = False
+            self._clear_queue_state()
             logger.info("Cleared move queue and stopped current move")
         elif command == "set_moving_state":
             try:
@@ -464,6 +495,47 @@ class MovementManager:
                 # Unfreeze: restart blending from frozen pose
                 self._antenna_unfreeze_blend = 0.0
             self.state.update_activity()
+        elif command == "freeze":
+            goto_duration = float(payload) if payload is not None else 0.5
+
+            # Clear the settle event atomically with _is_frozen (prevents
+            # TOCTOU race where the worker re-signals settled prematurely).
+            self._freeze_settled_event.clear()
+
+            # Clear everything currently queued or running
+            self._clear_queue_state()
+
+            # Zero all secondary offsets immediately
+            self.state.speech_offsets = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+            self.state.face_tracking_offsets = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+
+            # Snapshot current pose for smooth interpolation to neutral
+            start_head, start_antennas, start_body_yaw = clone_full_body_pose(
+                self._last_commanded_pose
+            )
+            neutral_head = create_head_pose(0, 0, 0, 0, 0, 0, degrees=True)
+
+            goto = GotoQueueMove(
+                target_head_pose=neutral_head,
+                start_head_pose=start_head,
+                target_antennas=(0.0, 0.0),
+                start_antennas=(float(start_antennas[0]), float(start_antennas[1])),
+                target_body_yaw=0.0,
+                start_body_yaw=float(start_body_yaw),
+                duration=goto_duration,
+            )
+            self.move_queue.append(goto)
+            self.state.update_activity()
+
+            self._is_frozen = True
+            logger.info("Freeze armed: goto neutral over %.2fs", goto_duration)
+
+        elif command == "unfreeze":
+            if self._is_frozen:
+                self._is_frozen = False
+                self.state.update_activity()
+                logger.info("Unfreeze: normal motion resumed")
+
         else:
             logger.warning("Unknown command received by MovementManager: %s", command)
 
@@ -821,10 +893,23 @@ class MovementManager:
             self._poll_signals(loop_start)
 
             # 2) Manage the primary move queue (start new move, end finished move, breathing)
-            self._update_primary_motion(loop_start)
+            if not self._is_frozen:
+                self._update_primary_motion(loop_start)
+            else:
+                # While frozen: drain the GotoQueueMove but skip breathing
+                self._manage_move_queue(loop_start)
+                # Signal settled when the goto to neutral has completed
+                if (
+                    not self._freeze_settled_event.is_set()
+                    and self.state.current_move is None
+                    and not self.move_queue
+                ):
+                    self._freeze_settled_event.set()
+                    logger.info("Freeze settled at neutral position")
 
             # 3) Update vision-based secondary offsets
-            self._update_face_tracking(loop_start)
+            if not self._is_frozen:
+                self._update_face_tracking(loop_start)
 
             # 4) Build primary and secondary full-body poses, then fuse them
             head, antennas, body_yaw = self._compose_full_body_pose(loop_start)

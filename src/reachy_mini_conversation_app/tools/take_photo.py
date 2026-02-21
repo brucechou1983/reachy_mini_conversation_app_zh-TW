@@ -30,7 +30,7 @@ class TakePhoto(Tool):
     }
 
     async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
-        """Freeze robot, capture at highest resolution, then resume."""
+        """Freeze robot at neutral, capture at highest resolution, then resume."""
         logger.info("Tool call: take_photo")
 
         if deps.camera_worker is None:
@@ -39,8 +39,7 @@ class TakePhoto(Tool):
         # Freeze the robot for a still capture
         was_tracking = deps.camera_worker.is_head_tracking_enabled
         try:
-            self._freeze(deps, was_tracking)
-            await asyncio.sleep(1.0)  # let the robot settle
+            await self._freeze(deps, was_tracking)
 
             # Try high-res capture first, fall back to buffered frame
             frame = await self._capture_high_res(deps)
@@ -71,23 +70,35 @@ class TakePhoto(Tool):
             "resolution": f"{w}x{h}",
         }
 
-    def _freeze(self, deps: ToolDependencies, was_tracking: bool) -> None:
-        """Stop all movement sources so the robot holds still."""
+    async def _freeze(self, deps: ToolDependencies, was_tracking: bool) -> None:
+        """Atomically freeze robot at neutral. Blocks until settled."""
         logger.info("Freezing robot for photo capture")
-        # Stop dances, emotions, breathing
-        deps.movement_manager.clear_move_queue()
-        # Disable face tracking
+
+        # 1. Reset HeadWobbler: discards buffered audio and increments generation
+        #    so in-flight processing won't push new speech offsets.
+        if deps.head_wobbler is not None:
+            deps.head_wobbler.reset()
+
+        # 2. Disable face tracking so CameraWorker stops computing new offsets.
         if was_tracking:
             deps.camera_worker.set_head_tracking_enabled(False)
-        # Zero speech sway
-        deps.movement_manager.set_speech_offsets((0.0, 0.0, 0.0, 0.0, 0.0, 0.0))
+
+        # 3. Freeze: clears queue, zeros offsets, interpolates to neutral, and
+        #    blocks until the robot has physically settled. Uses asyncio.to_thread
+        #    to avoid blocking the event loop during the wait.
+        settled = await asyncio.to_thread(
+            deps.movement_manager.freeze, 0.5, 3.0
+        )
+        if not settled:
+            logger.warning("Robot did not fully settle before photo capture")
 
     def _unfreeze(self, deps: ToolDependencies, was_tracking: bool) -> None:
-        """Restore movement sources after capture."""
+        """Release freeze; normal motion resumes."""
         logger.info("Unfreezing robot after photo capture")
+        deps.movement_manager.unfreeze()
         if was_tracking:
             deps.camera_worker.set_head_tracking_enabled(True)
-        # Breathing will restart automatically via MovementManager idle logic
+        # Breathing restarts automatically via MovementManager idle logic
 
     async def _capture_high_res(
         self, deps: ToolDependencies
