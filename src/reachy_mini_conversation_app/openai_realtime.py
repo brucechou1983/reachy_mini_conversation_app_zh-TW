@@ -14,7 +14,7 @@ from openai import AsyncOpenAI
 from fastrtc import AdditionalOutputs, AsyncStreamHandler, wait_for_item, audio_to_int16
 from numpy.typing import NDArray
 from scipy.signal import resample
-from websockets.exceptions import ConnectionClosedError
+from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
 
 from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.prompts import get_session_voice, get_session_instructions
@@ -63,6 +63,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         self._story_auto_advance_task: asyncio.Task | None = None  # current auto-advance task
         self._story_playback_done: asyncio.Event | None = None  # set when all audio chunks have been pushed
         self._story_playback_remaining: float = 0.0  # estimated remaining playback seconds when sentinel fires
+        self._tool_executing = False  # mute mic during tool calls to prevent VAD
         self.gradio_mode = gradio_mode
         self.instance_path = instance_path
         # Track how the API key was provided (env vs textbox) and its value
@@ -201,9 +202,9 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                 await self._run_realtime_session()
                 # Normal exit from the session, stop retrying
                 return
-            except ConnectionClosedError as e:
-                # Abrupt close (e.g., "no close frame received or sent") → retry
-                logger.warning("Realtime websocket closed unexpectedly (attempt %d/%d): %s", attempt, max_attempts, e)
+            except (ConnectionClosedError, ConnectionClosedOK) as e:
+                # Connection closed (restart or network issue) → retry
+                logger.warning("Realtime websocket closed (attempt %d/%d): %s", attempt, max_attempts, e)
                 if attempt < max_attempts:
                     # exponential backoff with jitter
                     base_delay = 2 ** (attempt - 1)  # 1s, 2s, 4s, 8s, etc.
@@ -421,6 +422,9 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                         logger.error("Invalid tool call: tool_name=%s, args=%s", tool_name, args_json_str)
                         continue
 
+                    # Mute mic during tool execution to prevent VAD from
+                    # triggering on ambient noise and creating a competing response.
+                    self._tool_executing = True
                     try:
                         tool_result = await dispatch_tool_call(tool_name, args_json_str, self.deps)
                         logger.debug("Tool '%s' executed successfully", tool_name)
@@ -428,6 +432,8 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                     except Exception as e:
                         logger.error("Tool '%s' failed", tool_name)
                         tool_result = {"error": str(e)}
+                    finally:
+                        self._tool_executing = False
 
                     # Refresh system prompt when memory changes so the LLM sees updates immediately
                     if tool_name in (
@@ -544,6 +550,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                     elif self.is_idle_tool_call:
                         self.is_idle_tool_call = False
                     else:
+                        logger.info("Requesting verbal response after tool '%s'", tool_name)
                         await self.connection.response.create(
                             response={
                                 "instructions": "根據剛才工具回傳的結果，用簡短的口語回答。請使用台灣中文，語氣要適合跟小朋友說話。",
@@ -581,6 +588,12 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
 
         """
         if not self.connection:
+            return
+
+        # Don't send audio while a tool is executing – prevents server VAD
+        # from interpreting ambient noise as speech and creating a competing
+        # response that blocks the post-tool response.create().
+        if self._tool_executing:
             return
 
         input_sample_rate, audio_frame = frame

@@ -144,6 +144,33 @@
         </div>
         <p id="personality-status" class="status"></p>
       </div>
+
+      <div id="photo-gallery-panel" class="panel hidden">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Gallery</p>
+            <h2>Photo Gallery</h2>
+          </div>
+          <span id="photo-count" class="chip">0 photos</span>
+        </div>
+        <p class="muted">Photos captured via the <code>take_photo</code> tool appear here. Click to preview, download, or delete.</p>
+        <div id="photo-grid" class="photo-grid">
+          <p class="muted">No photos yet.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Photo Preview Modal -->
+    <div id="photo-modal" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="modal-content">
+        <img id="modal-image" src="" alt="Photo preview" />
+        <div class="modal-actions">
+          <button id="modal-download">Download</button>
+          <button id="modal-delete" class="ghost">Delete</button>
+          <button id="modal-close" class="ghost">Close</button>
+        </div>
+      </div>
     </div>
 
     <script src="/static/main.js"></script>
