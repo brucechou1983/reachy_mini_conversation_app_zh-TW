@@ -58,6 +58,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         self.last_activity_time = asyncio.get_event_loop().time()
         self.start_time = asyncio.get_event_loop().time()
         self.is_idle_tool_call = False
+        self._tool_executing = False  # mute mic during tool calls to prevent VAD
         self.gradio_mode = gradio_mode
         self.instance_path = instance_path
         # Track how the API key was provided (env vs textbox) and its value
@@ -392,6 +393,9 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                         logger.error("Invalid tool call: tool_name=%s, args=%s", tool_name, args_json_str)
                         continue
 
+                    # Mute mic during tool execution to prevent VAD from
+                    # triggering on ambient noise and creating a competing response.
+                    self._tool_executing = True
                     try:
                         tool_result = await dispatch_tool_call(tool_name, args_json_str, self.deps)
                         logger.debug("Tool '%s' executed successfully", tool_name)
@@ -399,6 +403,8 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                     except Exception as e:
                         logger.error("Tool '%s' failed", tool_name)
                         tool_result = {"error": str(e)}
+                    finally:
+                        self._tool_executing = False
 
                     # Refresh system prompt when memory changes so the LLM sees updates immediately
                     if tool_name in (
@@ -480,6 +486,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                     if self.is_idle_tool_call:
                         self.is_idle_tool_call = False
                     else:
+                        logger.info("Requesting verbal response after tool '%s'", tool_name)
                         await self.connection.response.create(
                             response={
                                 "instructions": "根據剛才工具回傳的結果，用簡短的口語回答。請使用台灣中文，語氣要適合跟小朋友說話。",
@@ -517,6 +524,12 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
 
         """
         if not self.connection:
+            return
+
+        # Don't send audio while a tool is executing – prevents server VAD
+        # from interpreting ambient noise as speech and creating a competing
+        # response that blocks the post-tool response.create().
+        if self._tool_executing:
             return
 
         input_sample_rate, audio_frame = frame
