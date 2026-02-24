@@ -108,7 +108,7 @@ async def simulate_story_session(num_pages, behavior="normal", use_load=False):
 
     pages_visited = []
     results = []
-    current_action = ("go_to_page", {"page": 0})
+    current_action = ("go_to_page", {"page": 1})
 
     max_iterations = num_pages * 3 + 5  # safety guard
     iterations = 0
@@ -176,7 +176,7 @@ class TestHappyPathFullReadThrough:
     @pytest.mark.asyncio
     async def test_all_pages_visited_in_order(self):
         pages_visited, status, _ = await simulate_story_session(3)
-        assert pages_visited == [0, 1, 2]
+        assert pages_visited == [1, 2, 3]
 
     @pytest.mark.asyncio
     async def test_story_closed_at_end(self):
@@ -187,8 +187,8 @@ class TestHappyPathFullReadThrough:
     async def test_next_page_correct_at_each_step(self):
         _, _, results = await simulate_story_session(3)
         # go_to_page results (first 3), then close result
-        assert results[0]["next_page"] == 1
-        assert results[1]["next_page"] == 2
+        assert results[0]["next_page"] == 2
+        assert results[1]["next_page"] == 3
         assert results[2]["next_page"] is None
 
     @pytest.mark.asyncio
@@ -221,7 +221,7 @@ class TestSinglePageStory:
     @pytest.mark.asyncio
     async def test_single_page_visited(self):
         pages_visited, _, _ = await simulate_story_session(1)
-        assert pages_visited == [0]
+        assert pages_visited == [1]
 
     @pytest.mark.asyncio
     async def test_single_page_closes(self):
@@ -237,36 +237,36 @@ class TestSinglePageStory:
 
 
 class TestInterruptionMidStory:
-    """LLM gets interrupted on page 1 (answers a question), then resumes."""
+    """LLM gets interrupted on page 2 (answers a question), then resumes."""
 
     @pytest.mark.asyncio
     async def test_all_pages_still_visited(self):
         pages_visited, _, _ = await simulate_story_session(
-            3, behavior="interrupt_on_page_1"
+            3, behavior="interrupt_on_page_2"
         )
-        assert pages_visited == [0, 1, 2]
+        assert pages_visited == [1, 2, 3]
 
     @pytest.mark.asyncio
     async def test_story_closes_after_interruption(self):
         _, status, _ = await simulate_story_session(
-            3, behavior="interrupt_on_page_1"
+            3, behavior="interrupt_on_page_2"
         )
         assert status == "closed"
 
     @pytest.mark.asyncio
     async def test_interrupt_on_first_page(self):
         pages_visited, status, _ = await simulate_story_session(
-            3, behavior="interrupt_on_page_0"
+            3, behavior="interrupt_on_page_1"
         )
-        assert pages_visited == [0, 1, 2]
+        assert pages_visited == [1, 2, 3]
         assert status == "closed"
 
     @pytest.mark.asyncio
     async def test_interrupt_on_last_page(self):
         pages_visited, status, _ = await simulate_story_session(
-            3, behavior="interrupt_on_page_2"
+            3, behavior="interrupt_on_page_3"
         )
-        assert pages_visited == [0, 1, 2]
+        assert pages_visited == [1, 2, 3]
         assert status == "closed"
 
 
@@ -278,7 +278,7 @@ class TestLoadSavedStory:
         pages_visited, status, _ = await simulate_story_session(
             3, use_load=True
         )
-        assert pages_visited == [0, 1, 2]
+        assert pages_visited == [1, 2, 3]
         assert status == "closed"
 
     @pytest.mark.asyncio
@@ -296,7 +296,7 @@ class TestLoadSavedStory:
 
         tool = StoryBookGoToPage()
         deps = MagicMock()
-        await tool(deps, page=0)
+        await tool(deps, page=1)
         assert store.story.status == "reading"
 
         close = StoryBookClose()
@@ -318,10 +318,10 @@ class TestToolResultContract:
         story = store.create_story("t")
         store.set_story_ready(story.id, [StoryPage(text=f"p{i}") for i in range(3)])
 
-        result = await tool(deps, page=0)
+        result = await tool(deps, page=1)
         assert result["status"] == "ok"
-        assert result["page"] == 0
-        assert result["next_page"] == 1
+        assert result["page"] == 1
+        assert result["next_page"] == 2
         assert result["is_last_page"] is False
 
     @pytest.mark.asyncio
@@ -330,7 +330,7 @@ class TestToolResultContract:
         story = store.create_story("t")
         store.set_story_ready(story.id, [StoryPage(text=f"p{i}") for i in range(3)])
 
-        result = await tool(deps, page=2)
+        result = await tool(deps, page=3)
         assert result["status"] == "ok"
         assert result["next_page"] is None
         assert result["is_last_page"] is True
@@ -341,13 +341,13 @@ class TestToolResultContract:
         story = store.create_story("t")
         store.set_story_ready(story.id, [StoryPage(text="內容ABC")])
 
-        result = await tool(deps, page=0)
+        result = await tool(deps, page=1)
         assert result["page_text"] == "內容ABC"
 
     @pytest.mark.asyncio
     async def test_no_story_returns_error(self, tool, deps):
         StoryStore.get()
-        result = await tool(deps, page=0)
+        result = await tool(deps, page=1)
         assert "error" in result
 
     @pytest.mark.asyncio
@@ -355,5 +355,5 @@ class TestToolResultContract:
         store = StoryStore.get()
         store.create_story("still generating")
         # status is "generating" — pages not set yet
-        result = await tool(deps, page=0)
+        result = await tool(deps, page=1)
         assert "error" in result

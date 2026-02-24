@@ -31,7 +31,7 @@ class StoryBookOpen(Tool):
             },
             "page": {
                 "type": "integer",
-                "description": "從哪一頁開始（預設第 0 頁）",
+                "description": "從哪一頁開始（從 1 開始，預設第 1 頁）",
             },
         },
         "required": [],
@@ -83,23 +83,24 @@ class StoryBookOpen(Tool):
         store = StoryStore.get()
         store.load_story(story)
 
-        # Determine start page
-        page = kwargs.get("page", 0)
+        # Determine start page (1-based from LLM, convert to 0-based for URL)
+        page_1based = kwargs.get("page", 1)
+        page_0based = max(page_1based - 1, 0)
 
         # Update last read timestamp
         library.update_last_read(book_id)
 
-        # Auto-open reader in browser
-        webbrowser.open(f"http://localhost:7860/reader/books/{book_id}?page={page}")
+        # Auto-open reader in browser (URL uses 0-based index)
+        webbrowser.open(f"http://localhost:7860/reader/books/{book_id}?page={page_0based}")
 
         return {
             "status": "ok",
             "story_id": book_id,
             "title": story.title,
             "page_count": len(story.pages),
-            "start_page": page,
+            "start_page": page_1based,
             "message": (
                 f"已載入故事書「{story.title}」，共 {len(story.pages)} 頁。"
-                f"請呼叫 story_book_go_to_page(page={page}) 開始朗讀。"
+                f"請呼叫 story_book_go_to_page(page={page_1based}) 開始朗讀。"
             ),
         }
