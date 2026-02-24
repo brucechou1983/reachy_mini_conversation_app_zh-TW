@@ -667,54 +667,12 @@ class LocalStream:
             await asyncio.sleep(0)  # avoid busy loop
 
     async def play_loop(self) -> None:
-        """Fetch outputs from the handler: log text and play audio frames.
-
-        Story playback estimation
-        -------------------------
-        During story reading, the OpenAI Realtime API generates audio faster
-        than real-time.  push_audio_sample() is non-blocking — it feeds chunks
-        into the media pipeline buffer (e.g. GStreamer), which plays them back
-        at real-time speed.  So when the last chunk is pushed, there is still
-        un-played audio sitting in the buffer.
-
-        To estimate how much playback time remains we track:
-
-          story_first_push_ts   — wall-clock time when the first chunk was
-                                  pushed for the current page
-          story_pushed_duration — cumulative audio duration (seconds) of all
-                                  chunks pushed so far (samples / sample_rate)
-
-        When the sentinel ("story_audio_done") arrives — meaning all audio
-        chunks have been pushed — we calculate:
-
-          elapsed   = now - story_first_push_ts   (wall-clock time since first push)
-          remaining = story_pushed_duration - elapsed
-
-        Because the media pipeline plays at real-time speed starting from the
-        first push, ``remaining`` is the estimated time the buffer still needs
-        to drain before the speaker goes silent.  The auto-advance task adds
-        a 2.0 s safety buffer on top of this before advancing to the next page.
-        """
-        # Track story audio push timing for playback estimation
-        story_first_push_ts: float | None = None
-        story_pushed_duration: float = 0.0
-
+        """Fetch outputs from the handler: log text and play audio frames."""
         while not self._stop_event.is_set():
             handler_output = await self.handler.emit()
 
             if isinstance(handler_output, AdditionalOutputs):
                 for msg in handler_output.args:
-                    # Sentinel: all preceding audio chunks have been pushed.
-                    if msg.get("role") == "story_audio_done":
-                        if self.handler._story_playback_done is not None:
-                            now = asyncio.get_event_loop().time()
-                            elapsed = now - story_first_push_ts if story_first_push_ts else 0.0
-                            remaining = max(0.0, story_pushed_duration - elapsed)
-                            self.handler._story_playback_remaining = remaining
-                            self.handler._story_playback_done.set()
-                        story_first_push_ts = None
-                        story_pushed_duration = 0.0
-                        continue
                     content = msg.get("content", "")
                     if isinstance(content, str):
                         logger.info(
@@ -747,12 +705,6 @@ class LocalStream:
                     )
 
                 self._robot.media.push_audio_sample(audio_frame)
-
-                # Track story audio push timing
-                if self.handler._story_playback_done is not None and not self.handler._story_playback_done.is_set():
-                    if story_first_push_ts is None:
-                        story_first_push_ts = asyncio.get_event_loop().time()
-                    story_pushed_duration += len(audio_frame) / output_sample_rate
 
             else:
                 logger.debug("Ignoring output type=%s", type(handler_output).__name__)

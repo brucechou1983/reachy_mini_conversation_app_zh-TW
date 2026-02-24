@@ -1,11 +1,10 @@
-"""Integration tests for LLM-driven page advance logic.
+"""Integration tests for system-driven story page advance logic.
 
-Simulates the full dispatch cycle: tool returns result with instruction →
-mock LLM parses instruction → decides next tool call → repeat.
-This validates the contract between tool results and LLM behavior.
+The new model: the tool returns structured data (next_page, is_last_page)
+and the system auto-advances pages after audio playback finishes.
+Instructions no longer contain explicit tool-call commands.
 """
 
-import re
 import sys
 import uuid
 from pathlib import Path
@@ -35,57 +34,27 @@ from reachy_mini_conversation_app.tools.story_book_close import StoryBookClose
 
 
 # ---------------------------------------------------------------------------
-# Mock LLM decision logic
+# Simulation helpers
 # ---------------------------------------------------------------------------
 
-def mock_llm_decide(result, behavior="normal", pages_visited=None):
-    """Parse a tool result's instruction to decide the next action.
-
-    Simulates what a real LLM would do: read the instruction text and call
-    the appropriate tool.  Returns ``(tool_name, kwargs)`` or ``None``.
-    """
-    instruction = result.get("instruction", "")
-
-    # Interruption behaviour: on the target page, the LLM "answers a
-    # question" instead of advancing — it returns None for one turn,
-    # and the caller is expected to call again.
-    if behavior and behavior.startswith("interrupt_on_page_"):
-        target = int(behavior.split("_")[-1])
-        if (
-            result.get("page") == target
-            and pages_visited is not None
-            and pages_visited.count(target) == 1  # first visit only
-        ):
-            return "interrupted", {}
-
-    # Normal flow — follow the instruction text
-    m = re.search(r"story_book_go_to_page\(page=(\d+)\)", instruction)
-    if m:
-        return "go_to_page", {"page": int(m.group(1))}
-
-    if "story_book_close" in instruction:
-        return "close", {}
-
-    return None
-
-
 async def simulate_story_session(num_pages, behavior="normal", use_load=False):
-    """Simulate a complete story reading session.
+    """Simulate a complete story reading session using system-driven auto-advance.
 
     Parameters
     ----------
     num_pages : int
         Number of pages in the generated story.
     behavior : str
-        MockLLM behaviour mode (``"normal"`` or ``"interrupt_on_page_N"``).
+        ``"normal"`` for uninterrupted read-through, or
+        ``"interrupt_on_page_N"`` to simulate the user interrupting on page N
+        (auto-advance cancelled, then LLM resumes on the same page).
     use_load : bool
         If True, use ``StoryStore.load_story`` instead of create + set_ready.
 
     Returns
     -------
     tuple
-        (pages_visited, story_status, results) — the list of page indices
-        visited, final story status, and all intermediate tool results.
+        (pages_visited, story_status, results)
     """
     store = StoryStore.get()
     pages = [StoryPage(text=f"第{i}頁的內容") for i in range(num_pages)]
@@ -108,38 +77,50 @@ async def simulate_story_session(num_pages, behavior="normal", use_load=False):
 
     pages_visited = []
     results = []
-    current_action = ("go_to_page", {"page": 1})
+    interrupted_pages = set()
 
-    max_iterations = num_pages * 3 + 5  # safety guard
+    # Parse interruption target
+    interrupt_target = None
+    if behavior and behavior.startswith("interrupt_on_page_"):
+        interrupt_target = int(behavior.split("_")[-1])
+
+    # Start reading from page 1
+    next_page = 1
+    max_iterations = num_pages * 3 + 5
     iterations = 0
 
-    while current_action is not None:
+    while next_page is not None:
         iterations += 1
         if iterations > max_iterations:
             raise RuntimeError("simulation exceeded max iterations — likely infinite loop")
 
-        tool_name, kwargs = current_action
+        result = await go_to_page(deps, page=next_page)
+        pages_visited.append(result["page"])
+        results.append(result)
 
-        if tool_name == "go_to_page":
-            result = await go_to_page(deps, **kwargs)
-            pages_visited.append(result["page"])
-            results.append(result)
-            decision = mock_llm_decide(result, behavior, pages_visited)
-            if decision is None:
-                current_action = None
-            elif decision[0] == "interrupted":
-                # LLM answered a question; on the *next* response.create it
-                # re-reads the same instruction and follows it this time.
-                decision2 = mock_llm_decide(result, behavior="normal")
-                current_action = decision2
-            else:
-                current_action = decision
-        elif tool_name == "close":
-            result = await close_tool(deps)
-            results.append(result)
-            current_action = None
+        # Simulate interruption: user speaks → auto-advance cancelled
+        if interrupt_target == result["page"] and result["page"] not in interrupted_pages:
+            interrupted_pages.add(result["page"])
+            # After interruption, LLM resumes on the NEXT page
+            # (user says "continue" → LLM calls go_to_page for next_page)
+            if result["next_page"] is not None:
+                next_page = result["next_page"]
+            elif result["is_last_page"]:
+                # Interrupted on last page; after user resumes, system auto-closes
+                close_result = await close_tool(deps)
+                results.append(close_result)
+                next_page = None
+            continue
 
-    # Capture status before store.close_story sets it to None
+        # System auto-advance: use next_page from result
+        if result.get("is_last_page"):
+            # System auto-closes
+            close_result = await close_tool(deps)
+            results.append(close_result)
+            next_page = None
+        else:
+            next_page = result.get("next_page")
+
     final_status = store.story.status if store.story else "closed"
     return pages_visited, final_status, results
 
@@ -199,14 +180,12 @@ class TestHappyPathFullReadThrough:
         assert results[2]["is_last_page"] is True
 
     @pytest.mark.asyncio
-    async def test_instruction_drives_correct_tool(self):
+    async def test_instruction_has_no_tool_commands(self):
+        """Instructions should NOT contain tool call commands (system handles advance)."""
         _, _, results = await simulate_story_session(3)
-        # Pages 0 & 1 instruct go_to_page
-        assert "story_book_go_to_page" in results[0]["instruction"]
-        assert "story_book_go_to_page" in results[1]["instruction"]
-        # Page 2 (last) instructs close
-        assert "story_book_close" in results[2]["instruction"]
-        assert "story_book_go_to_page" not in results[2]["instruction"]
+        for r in results[:3]:  # go_to_page results
+            assert "story_book_go_to_page" not in r.get("instruction", "")
+            assert "story_book_close" not in r.get("instruction", "")
 
     @pytest.mark.asyncio
     async def test_close_result_shape(self):
@@ -229,15 +208,14 @@ class TestSinglePageStory:
         assert status == "closed"
 
     @pytest.mark.asyncio
-    async def test_single_page_instruction_says_close(self):
+    async def test_single_page_is_last(self):
         _, _, results = await simulate_story_session(1)
-        assert "story_book_close" in results[0]["instruction"]
         assert results[0]["is_last_page"] is True
         assert results[0]["next_page"] is None
 
 
 class TestInterruptionMidStory:
-    """LLM gets interrupted on page 2 (answers a question), then resumes."""
+    """User interrupts during narration — auto-advance cancelled, then resumes."""
 
     @pytest.mark.asyncio
     async def test_all_pages_still_visited(self):
@@ -306,7 +284,7 @@ class TestLoadSavedStory:
 
 
 # ---------------------------------------------------------------------------
-# Tool result contract checks (expanded from original unit tests)
+# Tool result contract checks
 # ---------------------------------------------------------------------------
 
 class TestToolResultContract:

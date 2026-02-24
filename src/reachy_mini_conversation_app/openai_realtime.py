@@ -58,11 +58,6 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         self.last_activity_time = asyncio.get_event_loop().time()
         self.start_time = asyncio.get_event_loop().time()
         self.is_idle_tool_call = False
-        self._story_reading_next_page: int | None = None  # auto-advance page tracker
-        self._story_done_countdown: int = 0  # response.done events to wait before auto-advance
-        self._story_auto_advance_task: asyncio.Task | None = None  # current auto-advance task
-        self._story_playback_done: asyncio.Event | None = None  # set when all audio chunks have been pushed
-        self._story_playback_remaining: float = 0.0  # estimated remaining playback seconds when sentinel fires
         self._tool_executing = False  # mute mic during tool calls to prevent VAD
         self.gradio_mode = gradio_mode
         self.instance_path = instance_path
@@ -82,6 +77,13 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         # Track whether a response is currently in progress (set=idle, clear=busy)
         self.response_idle: asyncio.Event = asyncio.Event()
         self.response_idle.set()  # starts idle
+
+        # Story auto-advance state
+        self._story_next_page: int | None = None
+        self._story_is_last_page: bool = False
+        self._story_advance_task: asyncio.Task | None = None
+        self._story_audio_start: float | None = None
+        self._story_audio_samples: int = 0
 
     def copy(self) -> "OpenaiRealtimeHandler":
         """Create a copy of the handler."""
@@ -171,6 +173,140 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         except asyncio.CancelledError:
             logger.debug("Debounced partial cancelled")
             raise
+
+    # ------------------------------------------------------------------
+    # Story auto-advance helpers
+    # ------------------------------------------------------------------
+
+    def _cancel_story_advance(self) -> None:
+        """Cancel any pending story auto-advance."""
+        if self._story_advance_task and not self._story_advance_task.done():
+            self._story_advance_task.cancel()
+            logger.info("Story auto-advance cancelled (user interrupted)")
+        self._story_next_page = None
+        self._story_is_last_page = False
+        self._story_advance_task = None
+        self._story_audio_start = None
+        self._story_audio_samples = 0
+
+    def _estimate_remaining_audio(self) -> float:
+        """Estimate seconds of audio left to play after response.done."""
+        sr = self.output_sample_rate or OPEN_AI_OUTPUT_SAMPLE_RATE
+        audio_dur = self._story_audio_samples / sr
+        elapsed = (
+            (asyncio.get_event_loop().time() - self._story_audio_start)
+            if self._story_audio_start
+            else 0
+        )
+        return max(0.0, audio_dur - elapsed) + 1.0  # 1 s buffer
+
+    async def _story_auto_advance(self, page: int, wait_seconds: float) -> None:
+        """Wait for audio playback to finish, then advance to the next page."""
+        try:
+            logger.info(
+                "Story auto-advance: waiting %.1fs before page %d", wait_seconds, page
+            )
+            await asyncio.sleep(wait_seconds)
+
+            # Wait for any active response to finish before creating a new one
+            await self.response_idle.wait()
+
+            tool_result = await dispatch_tool_call(
+                "story_book_go_to_page",
+                json.dumps({"page": page}),
+                self.deps,
+            )
+
+            # Push result to UI chat log
+            await self.output_queue.put(
+                AdditionalOutputs(
+                    {
+                        "role": "assistant",
+                        "content": json.dumps(tool_result, ensure_ascii=False),
+                    }
+                )
+            )
+
+            if tool_result.get("status") == "ok":
+                self._story_next_page = tool_result.get("next_page")
+                self._story_is_last_page = tool_result.get("is_last_page", False)
+                self._story_audio_start = None
+                self._story_audio_samples = 0
+                # Inject the instruction as a conversation item so the LLM
+                # has the story text in its message context (not just the
+                # ephemeral response-level instructions which it sometimes
+                # ignores).
+                await self.connection.conversation.item.create(
+                    item={
+                        "type": "message",
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "input_text",
+                                "text": tool_result.get("instruction", ""),
+                            }
+                        ],
+                    },
+                )
+                await self.connection.response.create(
+                    response={
+                        "tool_choice": "none",
+                    },
+                )
+            else:
+                logger.warning("Story auto-advance failed: %s", tool_result)
+                self._story_next_page = None
+                self._story_is_last_page = False
+        except asyncio.CancelledError:
+            logger.info("Story auto-advance to page %d cancelled", page)
+            self._story_next_page = None
+            self._story_is_last_page = False
+
+    async def _story_auto_close(self, wait_seconds: float) -> None:
+        """Wait for last-page audio to finish, then close the story reader."""
+        try:
+            logger.info("Story auto-close: waiting %.1fs", wait_seconds)
+            await asyncio.sleep(wait_seconds)
+
+            # Wait for any active response to finish before creating a new one
+            await self.response_idle.wait()
+
+            tool_result = await dispatch_tool_call(
+                "story_book_close", "{}", self.deps
+            )
+
+            await self.output_queue.put(
+                AdditionalOutputs(
+                    {
+                        "role": "assistant",
+                        "content": json.dumps(tool_result, ensure_ascii=False),
+                    }
+                )
+            )
+
+            self._story_next_page = None
+            self._story_is_last_page = False
+
+            close_msg = (
+                "故事說完了，用溫暖的口氣跟小朋友說故事結束了，"
+                "問他喜不喜歡這個故事。請使用台灣中文。"
+            )
+            await self.connection.conversation.item.create(
+                item={
+                    "type": "message",
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": close_msg}
+                    ],
+                },
+            )
+            await self.connection.response.create(
+                response={"tool_choice": "none"},
+            )
+        except asyncio.CancelledError:
+            logger.info("Story auto-close cancelled")
+            self._story_next_page = None
+            self._story_is_last_page = False
 
     async def start_up(self) -> None:
         """Start the handler with minimal retries on unexpected websocket closure."""
@@ -313,6 +449,8 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
             async for event in self.connection:
                 logger.debug(f"OpenAI event: {event.type}")
                 if event.type == "input_audio_buffer.speech_started":
+                    # Cancel story auto-advance on user interruption
+                    self._cancel_story_advance()
                     if hasattr(self, "_clear_queue") and callable(self._clear_queue):
                         self._clear_queue()
                     if self.deps.head_wobbler is not None:
@@ -341,22 +479,21 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                     self.response_idle.set()
                     logger.debug("Response done")
 
-                    # Countdown: wait for both tool-call response AND reading
-                    # response to finish before triggering auto-advance.
-                    if self._story_done_countdown > 0:
-                        self._story_done_countdown -= 1
-                        if self._story_done_countdown == 0 and self._story_reading_next_page is not None:
-                            next_page = self._story_reading_next_page
-                            self._story_reading_next_page = None
-                            # Put a sentinel into the output queue.
-                            # When play_loop processes it, all preceding audio
-                            # chunks have been pushed to the media pipeline.
-                            await self.output_queue.put(AdditionalOutputs({"role": "story_audio_done"}))
-                            logger.info(
-                                "Story auto-advance: audio generation done, scheduling page %d",
-                                next_page,
+                    # Schedule story auto-advance only after narration audio
+                    # was generated.  The tool-call response fires response.done
+                    # too, but _story_audio_samples is still 0 at that point
+                    # because the handler resets it before the narration starts.
+                    if self._story_audio_samples > 0:
+                        if self._story_next_page is not None:
+                            wait = self._estimate_remaining_audio()
+                            self._story_advance_task = asyncio.create_task(
+                                self._story_auto_advance(self._story_next_page, wait)
                             )
-                            self._story_auto_advance_task = asyncio.create_task(self._story_auto_advance(next_page))
+                        elif self._story_is_last_page:
+                            wait = self._estimate_remaining_audio()
+                            self._story_advance_task = asyncio.create_task(
+                                self._story_auto_close(wait)
+                            )
 
                 # Handle partial transcription (user speaking in real-time)
                 if event.type == "conversation.item.input_audio_transcription.partial":
@@ -411,6 +548,12 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                             np.frombuffer(audio_bytes, dtype=np.int16).reshape(1, -1),
                         ),
                     )
+
+                    # Track audio duration for story auto-advance timing
+                    if self._story_next_page is not None or self._story_is_last_page:
+                        if self._story_audio_start is None:
+                            self._story_audio_start = asyncio.get_event_loop().time()
+                        self._story_audio_samples += len(audio_bytes) // 2
 
                 # ---- tool-calling plumbing ----
                 if event.type == "response.function_call_arguments.done":
@@ -513,35 +656,22 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                     # if this tool call was triggered by an idle signal, don't make the robot speak
                     # for other tool calls, let the robot reply out loud
                     if tool_name == "story_book_go_to_page" and tool_result.get("status") == "ok":
-                        # Cancel any pending auto-advance task to prevent duplicates.
-                        if self._story_auto_advance_task and not self._story_auto_advance_task.done():
-                            self._story_auto_advance_task.cancel()
-                            logger.info("Story auto-advance: cancelled pending task")
-                        self._story_auto_advance_task = None
-
-                        # Track next page for auto-advance.
-                        # Countdown 2 = wait for (1) this tool-call response.done
-                        # + (2) the reading response.done before advancing.
-                        # Last page: no auto-advance; story stays open until
-                        # the user asks to close it.
-                        if not tool_result.get("is_last_page"):
-                            self._story_reading_next_page = tool_result["page"] + 1
-                            self._story_done_countdown = 2
-                            # Create the event now so play_loop can start
-                            # tracking audio push timing from the first chunk.
-                            self._story_playback_done = asyncio.Event()
-
+                        # Cancel any pending auto-advance to prevent duplicates
+                        if self._story_advance_task and not self._story_advance_task.done():
+                            self._story_advance_task.cancel()
+                            self._story_advance_task = None
+                        # Set up auto-advance state; response.done will schedule the next page
+                        self._story_next_page = tool_result.get("next_page")  # None on last page
+                        self._story_is_last_page = tool_result.get("is_last_page", False)
+                        self._story_audio_start = None
+                        self._story_audio_samples = 0
                         await self.connection.response.create(
                             response={
                                 "instructions": tool_result.get("instruction", ""),
+                                "tool_choice": "none",
                             },
                         )
                     elif tool_name == "story_book_close":
-                        if self._story_auto_advance_task and not self._story_auto_advance_task.done():
-                            self._story_auto_advance_task.cancel()
-                        self._story_auto_advance_task = None
-                        self._story_reading_next_page = None
-                        self._story_done_countdown = 0
                         await self.connection.response.create(
                             response={
                                 "instructions": "根據剛才工具回傳的結果，用簡短的口語回答。請使用台灣中文，語氣要適合跟小朋友說話。",
@@ -741,53 +871,6 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
             return voices
         except Exception:
             return fallback
-
-    async def _story_auto_advance(self, next_page: int) -> None:
-        """Wait for audio playback to finish, then advance to the next page.
-
-        Uses an event-based approach: a sentinel is placed in the output queue
-        after the last audio chunk.  When play_loop processes it (meaning all
-        preceding audio has been pushed to the media pipeline), the event is
-        set and we advance.
-        """
-        from reachy_mini_conversation_app.story_store import StoryStore
-
-        # Wait until all audio chunks have been pushed to the media pipeline.
-        if self._story_playback_done is not None:
-            logger.info("Story auto-advance: waiting for audio push to finish for page %d", next_page)
-            await self._story_playback_done.wait()
-            remaining = self._story_playback_remaining + 2.0  # buffer for media pipeline drain
-            logger.info("Story auto-advance: all chunks pushed, waiting %.1fs for remaining playback + buffer", remaining)
-            await asyncio.sleep(remaining)
-
-        store = StoryStore.get()
-        if not store.story or store.story.status != "reading":
-            return  # story was closed or changed
-
-        if not self.connection:
-            return
-
-        if store.story.current_page >= next_page:
-            logger.info("Story auto-advance: page %d already reached (current=%d), skipping", next_page, store.story.current_page)
-            return  # already advanced past this page
-
-        # Wait for any in-progress response to finish before creating a new one.
-        await self.response_idle.wait()
-
-        logger.info("Story auto-advance: advancing to page %d", next_page)
-        await self.connection.conversation.item.create(
-            item={
-                "type": "message",
-                "role": "user",
-                "content": [
-                    {
-                        "type": "input_text",
-                        "text": f"[系統: 請呼叫 story_book_go_to_page(page={next_page}) 翻到下一頁繼續朗讀故事。]",
-                    }
-                ],
-            },
-        )
-        await self.connection.response.create()
 
     async def send_idle_signal(self, idle_duration: float) -> None:
         """Send an idle signal to the openai server."""
