@@ -232,6 +232,11 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                 self._story_is_last_page = tool_result.get("is_last_page", False)
                 self._story_audio_start = None
                 self._story_audio_samples = 0
+
+                if self.connection is None:
+                    logger.warning("Story auto-advance: connection lost before page %d", page)
+                    return
+
                 # Inject the instruction as a conversation item so the LLM
                 # has the story text in its message context (not just the
                 # ephemeral response-level instructions which it sometimes
@@ -286,6 +291,10 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
 
             self._story_next_page = None
             self._story_is_last_page = False
+
+            if self.connection is None:
+                logger.warning("Story auto-close: connection lost")
+                return
 
             close_msg = (
                 "故事說完了，用溫暖的口氣跟小朋友說故事結束了，"
@@ -353,6 +362,8 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
             finally:
                 # never keep a stale reference
                 self.connection = None
+                self._cancel_story_advance()
+                self.response_idle.set()
                 try:
                     self._connected_event.clear()
                 except Exception:
@@ -393,6 +404,10 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
 
     async def _run_realtime_session(self) -> None:
         """Establish and manage a single realtime session."""
+        # Reset stale state from any previous session
+        self._cancel_story_advance()
+        self.response_idle.set()
+
         async with self.client.realtime.connect(model=config.MODEL_NAME) as conn:
             try:
                 await conn.session.update(
@@ -657,14 +672,10 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                     # for other tool calls, let the robot reply out loud
                     if tool_name == "story_book_go_to_page" and tool_result.get("status") == "ok":
                         # Cancel any pending auto-advance to prevent duplicates
-                        if self._story_advance_task and not self._story_advance_task.done():
-                            self._story_advance_task.cancel()
-                            self._story_advance_task = None
+                        self._cancel_story_advance()
                         # Set up auto-advance state; response.done will schedule the next page
                         self._story_next_page = tool_result.get("next_page")  # None on last page
                         self._story_is_last_page = tool_result.get("is_last_page", False)
-                        self._story_audio_start = None
-                        self._story_audio_samples = 0
                         await self.connection.response.create(
                             response={
                                 "instructions": tool_result.get("instruction", ""),
@@ -780,6 +791,9 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                 await self.partial_transcript_task
             except asyncio.CancelledError:
                 pass
+
+        # Cancel any pending story auto-advance task
+        self._cancel_story_advance()
 
         if self.connection:
             try:
