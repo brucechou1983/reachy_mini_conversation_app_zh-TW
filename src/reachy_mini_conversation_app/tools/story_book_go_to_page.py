@@ -19,22 +19,23 @@ class StoryBookGoToPage(Tool):
     name = "story_book_go_to_page"
     description = (
         "翻到故事書的指定頁面，在閱讀器上顯示，並朗讀該頁內容。"
-        "第一次呼叫時用 page=0 開始，之後遞增。"
+        "第一次呼叫時用 page=1 開始，之後遞增。"
     )
     parameters_schema = {
         "type": "object",
         "properties": {
             "page": {
                 "type": "integer",
-                "description": "要翻到的頁碼（從 0 開始）",
+                "description": "要翻到的頁碼（從 1 開始，第一頁是 1）",
             },
         },
         "required": ["page"],
     }
 
     async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
-        page = kwargs.get("page", 0)
-        logger.info("story_book_go_to_page called: page=%d", page)
+        page_1based = kwargs.get("page", 1)
+        page = max(page_1based - 1, 0)  # convert 1-based input to 0-based index
+        logger.info("story_book_go_to_page called: page=%d (1-based=%d)", page, page_1based)
 
         store = StoryStore.get()
         story = store.story
@@ -49,18 +50,34 @@ class StoryBookGoToPage(Tool):
         if sp is None:
             return {"error": "無效的頁碼"}
 
-        actual_page = story.current_page  # clamped value set by store.go_to_page
+        actual_page = story.current_page  # 0-based, clamped by store.go_to_page
         total = len(story.pages)
         is_last = actual_page >= total - 1
+        # Return 1-based page numbers to the LLM
+        actual_page_1 = actual_page + 1
+        next_page_1 = None if is_last else actual_page_1 + 1
+
+        if is_last:
+            instruction = (
+                f"你必須完整朗讀以下故事內容，一個字都不能省略，用溫暖生動的語氣說給小朋友聽。"
+                f"這是第 {actual_page_1} 頁（最後一頁）。"
+                f" 故事內容如下，請逐字朗讀：\n\n「{sp.text}」\n\n"
+                "重要：你只能朗讀上面的故事內容，不可以自己加話、不可以說過場語，不可以呼叫任何工具。"
+            )
+        else:
+            instruction = (
+                f"你必須完整朗讀以下故事內容，一個字都不能省略，用溫暖生動的語氣說給小朋友聽。"
+                f"這是第 {actual_page_1} 頁，共 {total} 頁。"
+                f" 故事內容如下，請逐字朗讀：\n\n「{sp.text}」\n\n"
+                "重要：你只能朗讀上面的故事內容，不可以自己加話、不可以說過場語，不可以呼叫任何工具。系統會自動翻頁。"
+            )
 
         return {
             "status": "ok",
-            "page": actual_page,
+            "page": actual_page_1,
             "total": total,
             "is_last_page": is_last,
+            "next_page": next_page_1,
             "page_text": sp.text,
-            "instruction": (
-                f"請用溫暖生動的語氣朗讀這一頁的故事內容給小朋友聽：「{sp.text}」"
-                " 只要朗讀這一頁就好，不要呼叫任何工具，系統會自動翻頁。"
-            ),
+            "instruction": instruction,
         }

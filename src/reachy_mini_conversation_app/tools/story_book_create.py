@@ -165,7 +165,7 @@ async def _generate_story(story_id: str, theme: str, num_pages: int, handler: An
                                 "type": "input_text",
                                 "text": (
                                     f"[系統通知: 故事書「{theme}」已經產生完成了！共有 {len(pages)} 頁。"
-                                    "請告訴小朋友故事好了，然後呼叫 story_book_go_to_page(page=0) 開始翻到第一頁朗讀故事。]"
+                                    "請告訴小朋友故事好了，然後呼叫 story_book_go_to_page(page=1) 開始翻到第一頁朗讀故事。]"
                                 ),
                             }
                         ],
