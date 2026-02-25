@@ -408,6 +408,23 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         self._cancel_story_advance()
         self.response_idle.set()
 
+        # Consolidate memories before starting the session (non-fatal)
+        if config.GEMINI_API_KEY:
+            try:
+                from reachy_mini_conversation_app.memory_consolidation import consolidate_memories
+
+                await asyncio.wait_for(
+                    consolidate_memories(self.deps.memory_store, config.GEMINI_API_KEY),
+                    timeout=30.0,
+                )
+                if self.deps.profile_memory_store:
+                    await asyncio.wait_for(
+                        consolidate_memories(self.deps.profile_memory_store, config.GEMINI_API_KEY),
+                        timeout=30.0,
+                    )
+            except Exception as e:
+                logger.warning("Memory consolidation failed (non-fatal): %s", e)
+
         async with self.client.realtime.connect(model=config.MODEL_NAME) as conn:
             try:
                 await conn.session.update(

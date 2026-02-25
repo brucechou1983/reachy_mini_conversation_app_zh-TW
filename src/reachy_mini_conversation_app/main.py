@@ -109,7 +109,7 @@ def run(
 
     head_wobbler = HeadWobbler(set_speech_offsets=movement_manager.set_speech_offsets)
 
-    memory_store = MemoryStore(instance_path=instance_path)
+    memory_store = MemoryStore.for_global(instance_path=instance_path)
     logger.info("Long-term memory initialized with %d entries", len(memory_store.list_all()))
 
     initial_profile = config.REACHY_MINI_CUSTOM_PROFILE

@@ -27,8 +27,8 @@ class SaveProfileMemory(Tool):
             },
             "memory_type": {
                 "type": "string",
-                "enum": ["fact", "summary"],
-                "description": "Type: 'fact' for profile-specific preferences, 'summary' for session activity recaps.",
+                "enum": ["fact", "event"],
+                "description": "Type: 'fact' for profile-specific preferences, 'event' for session activity recaps.",
             },
         },
         "required": ["content", "memory_type"],
@@ -45,8 +45,8 @@ class SaveProfileMemory(Tool):
 
         if not content:
             return {"error": "content is required"}
-        if memory_type not in ("fact", "summary"):
-            return {"error": "memory_type must be 'fact' or 'summary'"}
+        if memory_type not in ("fact", "event"):
+            return {"error": "memory_type must be 'fact' or 'event'"}
 
         store = getattr(deps, "profile_memory_store", None)
         if store is None:

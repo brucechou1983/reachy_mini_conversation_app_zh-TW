@@ -27,8 +27,8 @@ class SaveMemory(Tool):
             },
             "memory_type": {
                 "type": "string",
-                "enum": ["fact", "summary"],
-                "description": "Type of memory: 'fact' for user info/preferences, 'summary' for conversation summaries.",
+                "enum": ["fact", "event"],
+                "description": "Type of memory: 'fact' for user info/preferences, 'event' for conversation events.",
             },
         },
         "required": ["content", "memory_type"],
@@ -43,8 +43,8 @@ class SaveMemory(Tool):
 
         if not content:
             return {"error": "content is required"}
-        if memory_type not in ("fact", "summary"):
-            return {"error": "memory_type must be 'fact' or 'summary'"}
+        if memory_type not in ("fact", "event"):
+            return {"error": "memory_type must be 'fact' or 'event'"}
 
         store = getattr(deps, "memory_store", None)
         if store is None:
