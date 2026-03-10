@@ -1,0 +1,24 @@
+# === 技能啟動工具 (profile-local) ===
+activate_skill
+
+# === 互動工具 (shared) ===
+dance
+stop_dance
+play_emotion
+stop_emotion
+camera
+move_head
+head_tracking
+take_photo
+do_nothing
+
+# === 故事工具 (shared) ===
+story_book_create
+story_book_go_to_page
+story_book_close
+
+# === 記憶工具 (shared) ===
+save_memory
+forget_memory
+save_profile_memory
+forget_profile_memory

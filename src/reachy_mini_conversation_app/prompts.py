@@ -5,6 +5,7 @@ from typing import Any
 from pathlib import Path
 
 from reachy_mini_conversation_app.config import config
+from reachy_mini_conversation_app.skills import scan_skills, format_catalog
 
 
 logger = logging.getLogger(__name__)
@@ -96,6 +97,12 @@ def get_session_instructions(
                     profile_block = profile_memory_store.format_for_prompt()
                     if profile_block:
                         expanded_instructions = expanded_instructions + "\n\n" + profile_block
+
+                # Append skill catalog if the profile has Agent Skills
+                skill_entries = scan_skills(profile or "default")
+                skill_catalog = format_catalog(skill_entries)
+                if skill_catalog:
+                    expanded_instructions = expanded_instructions + "\n\n" + skill_catalog
 
                 return expanded_instructions
             logger.error(f"Profile '{profile}' has empty {INSTRUCTIONS_FILENAME}")

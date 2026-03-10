@@ -682,6 +682,12 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                                 "tool_choice": "none",
                             },
                         )
+                    elif tool_name == "activate_skill" and "instruction" in tool_result:
+                        await self.connection.response.create(
+                            response={
+                                "instructions": tool_result.get("instruction", ""),
+                            },
+                        )
                     elif tool_name == "story_book_close":
                         await self.connection.response.create(
                             response={
