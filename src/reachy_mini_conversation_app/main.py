@@ -92,8 +92,9 @@ def run(
             logger.error("Please check your configuration and try again.")
             sys.exit(1)
 
-    # Check if running in simulation mode without --gradio
-    if robot.client.get_status()["simulation_enabled"] and not args.gradio:
+    # Check if running in simulation mode without --gradio.
+    # get_status() returns a pydantic DaemonStatus (SDK >=1.8), not a dict.
+    if robot.client.get_status().simulation_enabled and not args.gradio:
         logger.error(
             "Simulation mode requires Gradio interface. Please use --gradio flag when running in simulation mode."
         )

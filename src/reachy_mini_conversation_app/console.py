@@ -648,10 +648,16 @@ class LocalStream:
     def clear_audio_queue(self) -> None:
         """Flush the player's appsrc to drop any queued audio immediately."""
         logger.info("User intervention: flushing player queue")
-        if self._robot.media.backend == MediaBackend.GSTREAMER:
+        # SDK >=1.8 renamed the backend enum: the GStreamer backends flush the
+        # pipeline via clear_player(); every other audio backend (LOCAL /
+        # SOUNDDEVICE / WEBRTC) uses clear_output_buffer().
+        if self._robot.media.backend in (
+            MediaBackend.GSTREAMER,
+            MediaBackend.GSTREAMER_NO_VIDEO,
+        ):
             # Directly flush gstreamer audio pipe
             self._robot.media.audio.clear_player()
-        elif self._robot.media.backend == MediaBackend.DEFAULT or self._robot.media.backend == MediaBackend.DEFAULT_NO_VIDEO:
+        elif self._robot.media.audio is not None:
             self._robot.media.audio.clear_output_buffer()
         self.handler.output_queue = asyncio.Queue()
 
