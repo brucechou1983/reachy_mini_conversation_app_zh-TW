@@ -50,6 +50,7 @@ def run(
     from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
     from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
     from reachy_mini_conversation_app.audio.head_wobbler import HeadWobbler
+    from reachy_mini_conversation_app.conversation_handler import ConversationHandler
 
     logger = setup_logger(args.debug)
     logger.info("Starting Reachy Mini Conversation App")
@@ -149,7 +150,17 @@ def run(
     )
     logger.debug(f"Chatbot avatar images: {chatbot.avatar_images}")
 
-    handler = OpenaiRealtimeHandler(deps, gradio_mode=args.gradio, instance_path=instance_path)
+    # Select the conversation backend (default: OpenAI Realtime). The Gemini Live
+    # handler is imported lazily so users on the OpenAI path never need google-genai.
+    handler: ConversationHandler
+    if config.HANDLER_TYPE == "gemini":
+        from reachy_mini_conversation_app.gemini_realtime import GeminiRealtimeHandler
+
+        logger.info("Conversation backend: Gemini Live")
+        handler = GeminiRealtimeHandler(deps, gradio_mode=args.gradio, instance_path=instance_path)
+    else:
+        logger.info("Conversation backend: OpenAI Realtime")
+        handler = OpenaiRealtimeHandler(deps, gradio_mode=args.gradio, instance_path=instance_path)
     deps.realtime_handler = handler
 
     stream_manager: gr.Blocks | LocalStream | None = None
@@ -203,7 +214,10 @@ def run(
             else:
                 os.environ.pop("TAVILY_API_KEY", None)
                 _cfg.TAVILY_API_KEY = None
-            await handler._restart_session()
+            # _restart_session is OpenAI-handler specific; Gemini handler has no equivalent.
+            restart = getattr(handler, "_restart_session", None)
+            if restart is not None:
+                await restart()
 
         with stream_manager:
             tavily_key_textbox.change(

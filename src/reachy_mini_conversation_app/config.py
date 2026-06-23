@@ -29,8 +29,25 @@ class Config:
     LOCAL_VISION_MODEL = os.getenv("LOCAL_VISION_MODEL", "HuggingFaceTB/SmolVLM2-2.2B-Instruct")
     HF_TOKEN = os.getenv("HF_TOKEN")  # Optional, falls back to hf auth login if not set
     TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")  # Optional, enables web_search tool
-    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")  # Optional, enables story_book tools
+    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")  # Optional, enables story_book tools (AI Studio)
     STORY_BOOKS_DIR = os.getenv("STORY_BOOKS_DIR")  # Optional, defaults to ~/.reachy_mini/books/
+
+    # Conversation backend: "openai" (default, OpenAI Realtime) or "gemini" (Gemini Live).
+    HANDLER_TYPE = os.getenv("HANDLER_TYPE", "openai")
+    # Gemini Live model used when HANDLER_TYPE=gemini. NOTE: Gemini 3 / 3.1 Flash Live is
+    # not yet published on Vertex AI; gemini-live-2.5-flash-native-audio is the current
+    # working Vertex Live model. Override via env when Flash 3 lands on Vertex.
+    GEMINI_LIVE_MODEL_NAME = os.getenv("GEMINI_LIVE_MODEL_NAME", "gemini-live-2.5-flash-native-audio")
+
+    # Route every Gemini call (Live conversation, storyteller, memory consolidation)
+    # through Vertex AI instead of AI Studio. Vertex uses ADC (gcloud auth
+    # application-default login) + project/location instead of an API key.
+    GOOGLE_GENAI_USE_VERTEXAI = os.getenv("GOOGLE_GENAI_USE_VERTEXAI", "").strip().lower() in ("1", "true", "yes")
+    GOOGLE_CLOUD_PROJECT = os.getenv("GOOGLE_CLOUD_PROJECT")
+    GOOGLE_CLOUD_LOCATION = os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1")  # Live API is regional, not "global"
+
+    # Gemini features (storyteller, memory consolidation) work via an AI Studio key OR Vertex AI.
+    GEMINI_AVAILABLE = bool(GEMINI_API_KEY) or GOOGLE_GENAI_USE_VERTEXAI
 
     logger.debug(f"Model: {MODEL_NAME}, HF_HOME: {HF_HOME}, Vision Model: {LOCAL_VISION_MODEL}")
 

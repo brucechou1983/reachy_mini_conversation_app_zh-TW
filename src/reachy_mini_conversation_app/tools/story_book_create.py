@@ -8,11 +8,11 @@ import logging
 import webbrowser
 from typing import Any, Dict
 
-from google import genai
 from google.genai import types
 
 from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.story_store import StoryPage, StoryStore
+from reachy_mini_conversation_app.genai_client import make_genai_client
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
 
 
@@ -22,25 +22,10 @@ GEMINI_TEXT_MODEL = "gemini-2.5-flash"
 GEMINI_IMAGE_MODEL = "gemini-2.5-flash-image"
 DEFAULT_NUM_PAGES = 12
 
-# Retry configuration for Gemini API calls
-_RETRY_OPTIONS = types.HttpRetryOptions(
-    attempts=4,
-    initial_delay=2.0,
-    max_delay=16.0,
-    exp_base=2.0,
-    http_status_codes=[429, 500, 502, 503, 504],
-)
 
-
-def _make_client(api_key: str, timeout: float = 60_000) -> genai.Client:
-    """Create a Gemini client with retry and timeout configuration."""
-    return genai.Client(
-        api_key=api_key,
-        http_options=types.HttpOptions(
-            timeout=int(timeout),
-            retry_options=_RETRY_OPTIONS,
-        ),
-    )
+def _make_client(timeout: float = 60_000) -> Any:
+    """Create a Gemini client (Vertex AI or AI Studio) with retry and timeout."""
+    return make_genai_client(timeout_ms=int(timeout), retry=True)
 
 
 class StoryBookCreate(Tool):
@@ -70,9 +55,8 @@ class StoryBookCreate(Tool):
     }
 
     def is_available(self) -> bool:
-        """Return True only when a Gemini API key is configured."""
-        key = getattr(config, "GEMINI_API_KEY", None)
-        return bool(key and str(key).strip())
+        """Return True when a Gemini backend (AI Studio key or Vertex AI) is configured."""
+        return config.GEMINI_AVAILABLE
 
     async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
         """Kick off background story generation and return immediately."""
@@ -106,16 +90,15 @@ class StoryBookCreate(Tool):
 
 async def _generate_story(story_id: str, theme: str, num_pages: int, handler: Any) -> None:
     """Background task: generate story text + images via Gemini API."""
-    api_key = getattr(config, "GEMINI_API_KEY", None)
-    if not api_key:
-        logger.error("No GEMINI_API_KEY configured")
+    if not config.GEMINI_AVAILABLE:
+        logger.error("No Gemini backend configured (set GEMINI_API_KEY or GOOGLE_GENAI_USE_VERTEXAI)")
         return
 
     store = StoryStore.get()
 
     try:
         # Step 1: Generate story text
-        story_pages_text = await _generate_story_text(api_key, theme, num_pages)
+        story_pages_text = await _generate_story_text(theme, num_pages)
         if not story_pages_text:
             logger.error("Failed to generate story text")
             if store.story and store.story.id == story_id:
@@ -127,7 +110,7 @@ async def _generate_story(story_id: str, theme: str, num_pages: int, handler: An
         for i, page_text in enumerate(story_pages_text):
             logger.info("Generating illustration for page %d/%d", i + 1, len(story_pages_text))
             image_b64, image_mime = await _generate_illustration(
-                api_key, theme, page_text, i + 1, len(story_pages_text)
+                theme, page_text, i + 1, len(story_pages_text)
             )
             pages.append(StoryPage(text=page_text, image_b64=image_b64, image_mime=image_mime))
 
@@ -183,7 +166,7 @@ async def _generate_story(story_id: str, theme: str, num_pages: int, handler: An
             store.close_story()
 
 
-async def _generate_story_text(api_key: str, theme: str, num_pages: int = DEFAULT_NUM_PAGES) -> list[str] | None:
+async def _generate_story_text(theme: str, num_pages: int = DEFAULT_NUM_PAGES) -> list[str] | None:
     """Generate story text via Gemini API, returning a list of page texts."""
     prompt = (
         f"你是一位專門為4到7歲小朋友寫故事的作家。請用台灣繁體中文，為以下主題寫一本 {num_pages} 頁的故事書。\n\n"
@@ -196,7 +179,7 @@ async def _generate_story_text(api_key: str, theme: str, num_pages: int = DEFAUL
         "只回傳 JSON，不要有其他文字。"
     )
 
-    client = _make_client(api_key, timeout=60_000)
+    client = _make_client(timeout=60_000)
     try:
         response = await client.aio.models.generate_content(
             model=GEMINI_TEXT_MODEL,
@@ -226,7 +209,7 @@ _IMAGE_GEN_RETRY_DELAY = 2.0
 
 
 async def _generate_illustration(
-    api_key: str, theme: str, page_text: str, page_num: int, total_pages: int
+    theme: str, page_text: str, page_num: int, total_pages: int
 ) -> tuple[str, str]:
     """Generate a single illustration via Gemini image model. Returns (base64, mime_type)."""
     prompt = (
@@ -238,7 +221,7 @@ async def _generate_illustration(
     )
 
     for attempt in range(1, _IMAGE_GEN_MAX_RETRIES + 1):
-        client = _make_client(api_key, timeout=120_000)
+        client = _make_client(timeout=120_000)
         try:
             response = await client.aio.models.generate_content(
                 model=GEMINI_IMAGE_MODEL,

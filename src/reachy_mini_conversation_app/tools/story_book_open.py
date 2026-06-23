@@ -38,9 +38,10 @@ class StoryBookOpen(Tool):
     }
 
     def is_available(self) -> bool:
-        """Return True only when a Gemini API key is configured."""
-        key = getattr(__import__("reachy_mini_conversation_app.config", fromlist=["config"]).config, "GEMINI_API_KEY", None)
-        return bool(key and str(key).strip())
+        """Return True when a Gemini backend (AI Studio key or Vertex AI) is configured."""
+        from reachy_mini_conversation_app.config import config
+
+        return config.GEMINI_AVAILABLE
 
     async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
         """List saved books, or load one by id and open the reader."""

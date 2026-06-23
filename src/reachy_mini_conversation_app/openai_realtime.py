@@ -11,7 +11,7 @@ import cv2
 import numpy as np
 import gradio as gr
 from openai import AsyncOpenAI
-from fastrtc import AdditionalOutputs, AsyncStreamHandler, wait_for_item, audio_to_int16
+from fastrtc import AdditionalOutputs, wait_for_item, audio_to_int16
 from numpy.typing import NDArray
 from scipy.signal import resample
 from websockets.exceptions import ConnectionClosedOK, ConnectionClosedError
@@ -23,6 +23,7 @@ from reachy_mini_conversation_app.tools.core_tools import (
     get_tool_specs,
     dispatch_tool_call,
 )
+from reachy_mini_conversation_app.conversation_handler import ConversationHandler
 
 
 logger = logging.getLogger(__name__)
@@ -31,7 +32,7 @@ OPEN_AI_INPUT_SAMPLE_RATE: Final[Literal[24000]] = 24000
 OPEN_AI_OUTPUT_SAMPLE_RATE: Final[Literal[24000]] = 24000
 
 
-class OpenaiRealtimeHandler(AsyncStreamHandler):
+class OpenaiRealtimeHandler(ConversationHandler):
     """An OpenAI realtime handler for fastrtc Stream."""
 
     def __init__(self, deps: ToolDependencies, gradio_mode: bool = False, instance_path: Optional[str] = None):
@@ -409,18 +410,18 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         self.response_idle.set()
 
         # Consolidate memories before starting the session (non-fatal)
-        if config.GEMINI_API_KEY:
+        if config.GEMINI_AVAILABLE:
             try:
                 from reachy_mini_conversation_app.memory_consolidation import consolidate_memories
 
                 if self.deps.memory_store is not None:
                     await asyncio.wait_for(
-                        consolidate_memories(self.deps.memory_store, config.GEMINI_API_KEY),
+                        consolidate_memories(self.deps.memory_store),
                         timeout=30.0,
                     )
                 if self.deps.profile_memory_store:
                     await asyncio.wait_for(
-                        consolidate_memories(self.deps.profile_memory_store, config.GEMINI_API_KEY),
+                        consolidate_memories(self.deps.profile_memory_store),
                         timeout=30.0,
                     )
             except Exception as e:

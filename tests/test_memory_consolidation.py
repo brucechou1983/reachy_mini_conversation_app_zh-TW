@@ -29,7 +29,7 @@ class TestConsolidation:
     @pytest.mark.asyncio
     async def test_below_threshold_skips(self, store: MarkdownMemoryStore):
         _add_facts(store, 5)
-        result = await consolidate_memories(store, api_key="fake-key", threshold=15)
+        result = await consolidate_memories(store, threshold=15)
         assert result is False
         assert len(store.list_all()) == 5
 
@@ -44,7 +44,7 @@ class TestConsolidation:
             "reachy_mini_conversation_app.memory_consolidation._call_gemini",
             mock_call,
         ):
-            result = await consolidate_memories(store, api_key="fake-key", threshold=15)
+            result = await consolidate_memories(store, threshold=15)
 
         assert result is True
 
@@ -68,7 +68,7 @@ class TestConsolidation:
             "reachy_mini_conversation_app.memory_consolidation._call_gemini",
             mock_call,
         ):
-            await consolidate_memories(store, api_key="fake-key", threshold=15)
+            await consolidate_memories(store, threshold=15)
 
         facts = [e for e in store.get_entries() if e.type == "fact"]
         assert len(facts) == 1
@@ -85,7 +85,7 @@ class TestConsolidation:
             mock_call,
         ):
             with pytest.raises(RuntimeError, match="API down"):
-                await consolidate_memories(store, api_key="fake-key", threshold=15)
+                await consolidate_memories(store, threshold=15)
 
         # Original entries should still be intact (no replace_entries called)
         assert len(store.list_all()) == 20
@@ -102,7 +102,7 @@ class TestConsolidation:
             "reachy_mini_conversation_app.memory_consolidation._call_gemini",
             mock_call,
         ):
-            result = await consolidate_memories(store, api_key="fake-key", threshold=15)
+            result = await consolidate_memories(store, threshold=15)
 
         assert result is False
         # Nothing replaced — all 20 original facts remain.
@@ -120,7 +120,7 @@ class TestConsolidation:
             mock_call,
         ):
             with pytest.raises(json.JSONDecodeError):
-                await consolidate_memories(store, api_key="fake-key", threshold=15)
+                await consolidate_memories(store, threshold=15)
 
         # replace_entries must not have run.
         assert len(store.list_all()) == 20
@@ -138,7 +138,7 @@ class TestConsolidation:
             "reachy_mini_conversation_app.memory_consolidation._call_gemini",
             mock_call,
         ):
-            result = await consolidate_memories(store, api_key="fake-key", threshold=15)
+            result = await consolidate_memories(store, threshold=15)
 
         assert result is True
         facts = [e for e in store.get_entries() if e.type == "fact"]
