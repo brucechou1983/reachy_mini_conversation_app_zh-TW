@@ -19,8 +19,9 @@ import cv2
 import numpy as np
 import gradio as gr
 import PIL.Image
-from fastrtc import AdditionalOutputs, wait_for_item
+from fastrtc import AdditionalOutputs, wait_for_item, audio_to_int16
 from numpy.typing import NDArray
+from scipy.signal import resample
 
 from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.prompts import get_session_instructions
@@ -264,12 +265,38 @@ class GeminiRealtimeHandler(ConversationHandler):
             self.input_transcription_buffer = ""
             self.output_transcription_buffer = ""
 
+    def _to_gemini_pcm(self, frame: Tuple[int, NDArray[np.int16]]) -> bytes:
+        """Convert a mic frame to Gemini Live's required format: 16 kHz, s16le, mono.
+
+        The robot mic can deliver stereo and/or float at an arbitrary sample
+        rate; sending it raw makes the Live server reject the session with a
+        1007 "invalid audio format" error. Mirror the OpenAI handler's
+        conversion (mono -> resample -> int16) before emitting raw PCM bytes.
+        """
+        input_sample_rate, audio_frame = frame
+
+        # Downmix to mono (scipy channels-last convention).
+        if audio_frame.ndim == 2:
+            if audio_frame.shape[1] > audio_frame.shape[0]:
+                audio_frame = audio_frame.T
+            if audio_frame.shape[1] > 1:
+                audio_frame = audio_frame[:, 0]
+        audio_frame = audio_frame.squeeze()
+
+        # Resample to the model's expected rate (16 kHz).
+        if self.input_sample_rate != input_sample_rate and audio_frame.size:
+            audio_frame = resample(
+                audio_frame, int(len(audio_frame) * self.input_sample_rate / input_sample_rate)
+            )
+
+        # Cast to signed 16-bit little-endian PCM.
+        return audio_to_int16(audio_frame).tobytes()
+
     async def receive(self, frame: Tuple[int, NDArray[np.int16]]) -> None:
-        """Forward a microphone frame to Gemini as raw 16 kHz PCM bytes."""
+        """Forward a microphone frame to Gemini as 16 kHz s16le mono PCM."""
         if not self.session:
             return
-        _, array = frame
-        audio_bytes = array.squeeze().tobytes()
+        audio_bytes = self._to_gemini_pcm(frame)
         try:
             # ``data`` must be RAW PCM bytes — the SDK base64-encodes it for the
             # wire. Passing a pre-base64'd string double-encodes it and the Live

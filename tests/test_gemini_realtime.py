@@ -2,11 +2,16 @@
 
 from unittest.mock import MagicMock
 
+import numpy as np
 import pytest
 
 import reachy_mini_conversation_app.gemini_realtime as gm
 from reachy_mini_conversation_app.gemini_realtime import GeminiRealtimeHandler
 from reachy_mini_conversation_app.conversation_handler import ConversationHandler
+
+
+def _sine(n: int, sr: int, freq: int = 440) -> np.ndarray:
+    return (0.2 * np.sin(2 * np.pi * freq * np.arange(n) / sr)).astype(np.float32)
 
 
 @pytest.mark.asyncio
@@ -45,3 +50,76 @@ async def test_copy_returns_fresh_instance():
     assert h2 is not h
     assert h2.gradio_mode is True
     assert h2.instance_path == "/tmp/x"
+
+
+# --- Audio format conversion (regression for Live 1007 "invalid audio format") ---
+
+
+def test_to_gemini_pcm_stereo_48k_becomes_mono_16k_int16():
+    """Stereo float @ 48 kHz must be downmixed, resampled to 16 kHz, cast to int16."""
+    h = GeminiRealtimeHandler(MagicMock())
+    n = 4800  # 0.1 s @ 48 kHz
+    sig = _sine(n, 48000)
+    stereo = np.stack([sig, sig], axis=1)  # (n, 2), channels-last
+
+    out = h._to_gemini_pcm((48000, stereo))
+
+    assert isinstance(out, bytes)
+    assert len(out) % 2 == 0  # whole int16 samples
+    arr = np.frombuffer(out, dtype=np.int16)
+    assert arr.ndim == 1  # mono
+    assert abs(len(arr) - 1600) <= 2  # 48k -> 16k => ~1600 samples
+    assert arr.any()  # not silence
+
+
+def test_to_gemini_pcm_mono_16k_keeps_length():
+    """Already-correct mono 16 kHz audio is only cast to int16 (no resample)."""
+    h = GeminiRealtimeHandler(MagicMock())
+    sig = _sine(1600, 16000, freq=220)
+
+    arr = np.frombuffer(h._to_gemini_pcm((16000, sig)), dtype=np.int16)
+
+    assert len(arr) == 1600
+    assert arr.dtype == np.int16
+
+
+def test_to_gemini_pcm_int16_stereo_column_downmix():
+    """int16 stereo input is reduced to a single channel."""
+    h = GeminiRealtimeHandler(MagicMock())
+    left = (_sine(1600, 16000) * 32000).astype(np.int16)
+    right = np.zeros(1600, dtype=np.int16)
+    stereo = np.stack([left, right], axis=1)  # (1600, 2)
+
+    arr = np.frombuffer(h._to_gemini_pcm((16000, stereo)), dtype=np.int16)
+
+    assert len(arr) == 1600  # mono, no resample
+    np.testing.assert_array_equal(arr, left)  # took channel 0, not the silent one
+
+
+@pytest.mark.asyncio
+async def test_receive_sends_int16_mono_16k_pcm():
+    """receive() must hand Gemini raw s16le mono 16 kHz bytes, not the raw frame."""
+    h = GeminiRealtimeHandler(MagicMock())
+    sent: dict = {}
+
+    class FakeSession:
+        async def send_realtime_input(self, audio=None):
+            sent["audio"] = audio
+
+    h.session = FakeSession()
+    stereo = np.stack([_sine(4800, 48000)] * 2, axis=1)  # stereo float 48 kHz
+
+    await h.receive((48000, stereo))
+
+    assert sent["audio"]["mime_type"] == "audio/pcm;rate=16000"
+    assert isinstance(sent["audio"]["data"], bytes)  # raw bytes, not base64 str
+    arr = np.frombuffer(sent["audio"]["data"], dtype=np.int16)
+    assert abs(len(arr) - 1600) <= 2
+
+
+@pytest.mark.asyncio
+async def test_receive_without_session_is_noop():
+    """No session -> drop the frame silently (no crash, no send)."""
+    h = GeminiRealtimeHandler(MagicMock())
+    h.session = None
+    await h.receive((48000, np.zeros((10, 2), dtype=np.float32)))
