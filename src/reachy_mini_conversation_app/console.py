@@ -14,10 +14,12 @@ import sys
 import time
 import asyncio
 import logging
-from typing import List, Optional
+from typing import Any, List, Optional
 from pathlib import Path
 
+import numpy as np
 from fastrtc import AdditionalOutputs, audio_to_float32
+from numpy.typing import NDArray
 from scipy.signal import resample
 
 from reachy_mini import ReachyMini
@@ -43,6 +45,37 @@ except Exception:  # pragma: no cover - only loaded when settings_app is used
 
 
 logger = logging.getLogger(__name__)
+
+
+def _prepare_output_audio(
+    audio_data: "NDArray[Any]",
+    input_sample_rate: int,
+    output_sample_rate: int,
+) -> "NDArray[np.float32] | None":
+    """Downmix to mono, cast to float32, and resample to the speaker rate.
+
+    Returns ``None`` for empty / sub-sample frames. The Gemini Live backend can
+    emit a 0- or 1-sample audio chunk, which makes the resample target length 0
+    and ``scipy.signal.resample`` raise ``ZeroDivisionError`` — guard against it.
+    """
+    # Reshape if needed (scipy channels-last convention) -> mono
+    if audio_data.ndim == 2:
+        if audio_data.shape[1] > audio_data.shape[0]:
+            audio_data = audio_data.T
+        if audio_data.shape[1] > 1:
+            audio_data = audio_data[:, 0]
+
+    audio_frame = audio_to_float32(audio_data)
+    if audio_frame.size == 0:
+        return None
+
+    if input_sample_rate != output_sample_rate:
+        num = int(len(audio_frame) * output_sample_rate / input_sample_rate)
+        if num <= 0:
+            return None
+        audio_frame = resample(audio_frame, num)
+
+    return audio_frame
 
 
 class LocalStream:
@@ -691,26 +724,11 @@ class LocalStream:
                 input_sample_rate, audio_data = handler_output
                 output_sample_rate = self._robot.media.get_output_audio_samplerate()
 
-                # Reshape if needed
-                if audio_data.ndim == 2:
-                    # Scipy channels last convention
-                    if audio_data.shape[1] > audio_data.shape[0]:
-                        audio_data = audio_data.T
-                    # Multiple channels -> Mono channel
-                    if audio_data.shape[1] > 1:
-                        audio_data = audio_data[:, 0]
-
-                # Cast if needed
-                audio_frame = audio_to_float32(audio_data)
-
-                # Resample if needed
-                if input_sample_rate != output_sample_rate:
-                    audio_frame = resample(
-                        audio_frame,
-                        int(len(audio_frame) * output_sample_rate / input_sample_rate),
-                    )
-
-                self._robot.media.push_audio_sample(audio_frame)
+                audio_frame = _prepare_output_audio(
+                    audio_data, input_sample_rate, output_sample_rate
+                )
+                if audio_frame is not None:
+                    self._robot.media.push_audio_sample(audio_frame)
 
             else:
                 logger.debug("Ignoring output type=%s", type(handler_output).__name__)
