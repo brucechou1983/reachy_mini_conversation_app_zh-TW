@@ -13,8 +13,13 @@ dependencies = [
     #Media
     "aiortc>=1.13.0",
     "fastrtc>=0.0.34",
-    "gradio==5.50.1.dev1",
-    "huggingface-hub==1.3.0",
+    # gradio is pinned to the 5.23.x line: it is the only series whose
+    # pydantic constraint (>=2.0, no upper cap) coexists with reachy-mini
+    # 1.8.x (pydantic>=2.12.5). gradio 5.49+ caps pydantic <2.12.5. This
+    # matches the gradio version the reachy-mini desktop app's shared venv
+    # resolves to via fastrtc.
+    "gradio>=5.23,<5.24",
+    "huggingface-hub>=1.17.0,<2.0.0",
     "opencv-python>=4.12.0.88",
 
     #Environment variables
@@ -29,9 +34,8 @@ dependencies = [
     #Reachy mini
     "reachy_mini_dances_library",
     "reachy_mini_toolbox",
-    "reachy-mini >= 1.2.11",
-    "eclipse-zenoh~=1.7.0",
-    "gradio_client>=1.13.3",
+    "reachy-mini >= 1.8.3",
+    "gradio_client>=1.8",
 ]
 
 [project.optional-dependencies]
@@ -41,7 +45,7 @@ reachy_mini_wireless = [
 ]
 local_vision = [
   "torch>=2.1",
-  "transformers==5.0.0rc2",
+  "transformers==5.3.0",
   "num2words",
 ]
 yolo_vision = [
@@ -53,7 +57,7 @@ mediapipe_vision = [
 ]
 all_vision = [
   "torch>=2.1",
-  "transformers==5.0.0rc2",
+  "transformers==5.3.0",
   "num2words",
   "ultralytics",
   "supervision",
@@ -68,7 +72,6 @@ dev = [
   "mypy==1.18.2",
   "pre-commit",
   "types-requests",
-  "python-semantic-release>=10.5.3",
 ]
 
 [project.scripts]
