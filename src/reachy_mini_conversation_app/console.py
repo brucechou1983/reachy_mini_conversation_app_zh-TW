@@ -24,7 +24,7 @@ from reachy_mini import ReachyMini
 from reachy_mini.media.media_manager import MediaBackend
 from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.story_routes import mount_story_routes
-from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
+from reachy_mini_conversation_app.conversation_handler import ConversationHandler
 from reachy_mini_conversation_app.headless_personality_ui import mount_personality_routes
 
 
@@ -50,7 +50,7 @@ class LocalStream:
 
     def __init__(
         self,
-        handler: OpenaiRealtimeHandler,
+        handler: ConversationHandler,
         robot: ReachyMini,
         *,
         settings_app: Optional[FastAPI] = None,

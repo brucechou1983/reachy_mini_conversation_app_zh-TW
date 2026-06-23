@@ -37,29 +37,17 @@ _CONSOLIDATION_PROMPT = """\
 """
 
 
-async def _call_gemini(api_key: str, prompt: str) -> str:
-    """Call Gemini API and return the response text.
+async def _call_gemini(prompt: str) -> str:
+    """Call Gemini (Vertex AI or AI Studio) and return the response text.
 
-    All ``google.genai`` imports are contained here so the rest of the
-    module can be imported (and tested) without the SDK installed.
+    The ``google.genai`` import is contained here so the rest of the module
+    can be imported (and tested) without the SDK installed.
     """
-    from google import genai
     from google.genai import types
 
-    retry_options = types.HttpRetryOptions(
-        attempts=4,
-        initial_delay=2.0,
-        max_delay=16.0,
-        exp_base=2.0,
-        http_status_codes=[429, 500, 502, 503, 504],
-    )
-    client = genai.Client(
-        api_key=api_key,
-        http_options=types.HttpOptions(
-            timeout=30_000,
-            retry_options=retry_options,
-        ),
-    )
+    from reachy_mini_conversation_app.genai_client import make_genai_client
+
+    client = make_genai_client(timeout_ms=30_000, retry=True)
     try:
         response = await client.aio.models.generate_content(
             model=GEMINI_MODEL,
@@ -76,13 +64,12 @@ async def _call_gemini(api_key: str, prompt: str) -> str:
 
 async def consolidate_memories(
     store: MarkdownMemoryStore,
-    api_key: str,
     threshold: int = 15,
 ) -> bool:
     """Consolidate fact memories if count exceeds *threshold*.
 
     Events are preserved as-is.  Returns ``True`` if consolidation was
-    performed.
+    performed. Gemini auth (AI Studio key vs Vertex AI) is resolved via config.
     """
     entries = store.get_entries()
     facts = [e for e in entries if e.type == "fact"]
@@ -103,7 +90,7 @@ async def consolidate_memories(
     prompt = _CONSOLIDATION_PROMPT.format(facts=fact_lines)
 
     try:
-        text = await _call_gemini(api_key, prompt)
+        text = await _call_gemini(prompt)
 
         merged_facts: list[str] = json.loads(text)
         if not isinstance(merged_facts, list):
