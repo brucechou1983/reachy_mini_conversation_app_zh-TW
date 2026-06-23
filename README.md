@@ -66,12 +66,24 @@ cd reachy_mini_conversation_app_zh-TW
 
 | 變數 | 必填 | 說明 |
 |------|:----:|------|
-| `OPENAI_API_KEY` | **是** | OpenAI 即時語音 API 金鑰 |
-| `GEMINI_API_KEY` | 選填 | 互動說故事與長期記憶自動整理所需（[取得](https://aistudio.google.com)） |
+| `OPENAI_API_KEY` | **是** | OpenAI 即時語音 API 金鑰（預設後端） |
+| `GEMINI_API_KEY` | 選填 | 互動說故事、長期記憶自動整理，以及 AI Studio 的 Gemini Live 語音後端所需（[取得](https://aistudio.google.com)） |
 | `TAVILY_API_KEY` | 選填 | 網路搜尋功能所需（[取得](https://tavily.com)） |
 
 
-### 3. 故事閱讀器
+### 3. 對話後端（OpenAI 或 Gemini Live）
+
+預設使用 OpenAI 即時語音（`HANDLER_TYPE=openai`）。設定 `HANDLER_TYPE=gemini` 可改用 Gemini Live 語音，認證二選一：
+
+| 方式 | 設定 | Live 模型 | 計費 |
+|------|------|-----------|------|
+| **A. Vertex AI** | `GOOGLE_GENAI_USE_VERTEXAI=true` + `GOOGLE_CLOUD_PROJECT`（需先 `gcloud auth application-default login`） | `gemini-live-2.5-flash-native-audio`（Vertex 目前只有 2.5） | 記入 GCP 帳單，**GCP credit 可折抵** |
+| **B. AI Studio** | `GOOGLE_GENAI_USE_VERTEXAI=` 留空 + `GEMINI_API_KEY` | `gemini-3.1-flash-live-preview`（**Flash 3，只在 AI Studio**） | **GCP credit 不適用**；免費層或預付 |
+
+> ⚠️ AI Studio **免費層**：單段語音上限 15 分鐘（app 會自動重連續接），且**對話可能被 Google 用於改善模型**——兒童資料請改用付費層或 Vertex AI。
+
+
+### 4. 故事閱讀器
 
 啟動後請汪汪開啟故事書，或是手動打開 `http://127.0.0.1:7860/reader`，即可看到你的繪本。
 
