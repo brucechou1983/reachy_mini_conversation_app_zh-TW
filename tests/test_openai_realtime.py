@@ -112,6 +112,6 @@ async def test_start_up_retries_on_abrupt_close(monkeypatch: Any, caplog: Any) -
     assert attempt_counter["n"] == 2
     assert handler.connection is None
 
-    # Optional: confirm we logged the unexpected close once
-    warnings = [r for r in caplog.records if r.levelname == "WARNING" and "closed unexpectedly" in r.msg]
+    # Optional: confirm we logged the abrupt close once
+    warnings = [r for r in caplog.records if r.levelname == "WARNING" and "websocket closed" in r.msg]
     assert len(warnings) == 1

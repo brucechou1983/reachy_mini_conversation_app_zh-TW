@@ -64,3 +64,7 @@ src/reachy_mini_conversation_app/profiles/user_personalities/
 memories.json
 memories.json.tmp
 profile_memories/
+
+# Claude
+CLAUDE.md
+.claude/
