@@ -50,6 +50,18 @@ Reachy Mini 機器人的對話應用程式，結合 OpenAI 即時語音 API、�
 
 透過 [Reachy Mini Desktop App](https://github.com/pollen-robotics/reachy-mini-desktop-app) 搜尋 `reachy_mini_conversation_app_zh-TW`，即可一鍵安裝本應用程式。
 
+**或者：用腳本在任何 Mac 上安裝（CLI）。** 想把機器人接到不同 Mac 直接跑時，這是最簡單的可重現方式——`uv.lock` 確保每台機器裝出完全一致的環境（不需要 Docker；Docker Desktop on Mac 跑在 Linux VM 裡，無法存取 Mac 的相機/麥克風/喇叭與 USB）：
+
+```bash
+git clone https://github.com/brucechou1983/reachy_mini_conversation_app_zh-TW.git
+cd reachy_mini_conversation_app_zh-TW
+./scripts/setup-mac.sh        # 安裝 uv (必要時) + 依 uv.lock 建環境 + 建立 .env
+# 編輯 .env 填入 OPENAI_API_KEY，並確認 Reachy Mini daemon 已啟動
+./scripts/run.sh              # 啟動 (加 --gradio 開網頁介面)
+```
+
+`setup-mac.sh` 是冪等的，重跑安全；換新 Mac 只要重複這幾行即可。
+
 ### 2. 基本設定
 
 | 變數 | 必填 | 說明 |
