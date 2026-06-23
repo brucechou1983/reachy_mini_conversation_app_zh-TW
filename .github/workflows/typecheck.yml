@@ -14,6 +14,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      # reachy-mini 1.8 pulls PyGObject -> pycairo, which needs system cairo
+      # and gobject-introspection headers to build on Linux.
+      - name: Install system dependencies
+        uses: awalsh128/cache-apt-pkgs-action@acb598e5ddbc6f68a970c5da0688d2f3a9f04d05  # v1.6.0
+        with:
+          packages: libcairo2-dev libgirepository1.0-dev
+          version: 1.0
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
