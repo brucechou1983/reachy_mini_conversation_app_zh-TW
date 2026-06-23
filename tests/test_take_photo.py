@@ -77,3 +77,35 @@ def test_is_a_registered_tool():
     # sanity: TakePhoto declares the expected tool name
     assert TakePhoto.name == "take_photo"
     assert isinstance(TakePhoto().parameters_schema, dict)
+
+
+# --- _auto_brighten (SDK 1.8 low-light fallback) ---
+
+
+def test_auto_brighten_lifts_dark_frame():
+    dark = np.full((8, 8, 3), 20, dtype=np.uint8)  # mean 20 -> gain 4x (capped)
+    out = TakePhoto._auto_brighten(dark)
+    assert out.dtype == np.uint8
+    assert out.shape == dark.shape
+    assert out.mean() > dark.mean()
+    assert out.mean() == 80  # 20 * min(110/20, 4) = 20 * 4
+
+
+def test_auto_brighten_leaves_bright_frame_untouched():
+    bright = np.full((8, 8, 3), 150, dtype=np.uint8)  # >= target_mean
+    out = TakePhoto._auto_brighten(bright)
+    np.testing.assert_array_equal(out, bright)
+
+
+def test_auto_brighten_handles_black_frame_without_crash():
+    black = np.zeros((8, 8, 3), dtype=np.uint8)  # mean 0 -> capped gain, stays 0
+    out = TakePhoto._auto_brighten(black)
+    assert out.dtype == np.uint8
+    assert out.max() <= 255
+
+
+def test_auto_brighten_caps_gain_and_clips():
+    dark = np.full((4, 4, 3), 50, dtype=np.uint8)  # gain min(110/50,4)=2.2 -> 110
+    out = TakePhoto._auto_brighten(dark)
+    assert out.mean() == 110
+    assert out.max() <= 255

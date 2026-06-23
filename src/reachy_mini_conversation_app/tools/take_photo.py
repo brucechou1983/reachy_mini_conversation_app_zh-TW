@@ -148,7 +148,12 @@ class TakePhoto(Tool):
             # Try high-res capture; fall back to the buffered stream frame.
             frame = await asyncio.to_thread(self._capture_high_res, deps)
             if frame is None:
+                # SDK 1.8+ has no direct camera object, so the UVC/AEC exposure
+                # path above is skipped and this raw frame is dark in low light.
+                # Brighten it in software so the saved photo is visible.
                 frame = deps.camera_worker.get_latest_frame()
+                if frame is not None:
+                    frame = self._auto_brighten(frame)
         finally:
             self._unfreeze(deps, was_tracking)
 
@@ -356,3 +361,31 @@ class TakePhoto(Tool):
         corrected = dark.astype(np.float32) * gain.astype(np.float32)
         np.clip(corrected, 0, 255, out=corrected)
         return cast(NDArray[np.uint8], corrected.astype(np.uint8))
+
+    @staticmethod
+    def _auto_brighten(
+        frame: NDArray[np.uint8],
+        target_mean: float = 110.0,
+        max_gain: float = 4.0,
+    ) -> NDArray[np.uint8]:
+        """Brighten a dark frame toward *target_mean* luma with a capped gain.
+
+        On SDK 1.8 the UVC/AEC high-res path is unavailable, so take_photo falls
+        back to the raw buffered stream frame — which is very dark in low light.
+        Apply a capped linear gain so the saved photo is visible, without blowing
+        out a scene that is already well lit (gain <= 1 -> returned unchanged).
+        """
+        if frame is None or frame.size == 0:
+            return frame
+
+        mean = float(frame.mean())
+        if mean >= target_mean:
+            return frame  # already bright enough
+        gain = max_gain if mean <= 1.0 else min(target_mean / mean, max_gain)
+        if gain <= 1.0:
+            return frame
+
+        logger.info("Software auto-brighten: mean=%.1f gain=%.2f", mean, gain)
+        brightened = frame.astype(np.float32) * gain
+        np.clip(brightened, 0, 255, out=brightened)
+        return cast(NDArray[np.uint8], brightened.astype(np.uint8))
