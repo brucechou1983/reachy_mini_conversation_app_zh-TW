@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-TW">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>跟著汪汪讀 - Reachy Mini</title>
+    <link rel="stylesheet" href="/static/read_along.css" />
+  </head>
+  <body>
+    <div id="reader-screen" class="ra-screen active">
+      <img id="bg-image" class="ra-bg" alt="" />
+      <div class="ra-overlay"></div>
+
+      <div class="ra-top">
+        <span id="title" class="ra-title"></span>
+        <span class="ra-progress">
+          <span id="page-num">1</span> / <span id="page-total">1</span>
+        </span>
+        <span id="stars" class="ra-stars" aria-label="stars"></span>
+      </div>
+
+      <div class="ra-stage">
+        <div id="words" class="ra-words"></div>
+        <p id="prompt" class="ra-prompt"></p>
+      </div>
+
+      <div id="banner" class="ra-banner">換你讀！Your turn 📖</div>
+    </div>
+
+    <div id="reward-screen" class="ra-screen ra-center">
+      <div class="ra-reward-emoji">🎉</div>
+      <div id="reward-stars" class="ra-reward-stars"></div>
+      <h1>太棒了！</h1>
+      <p id="reward-text" class="ra-reward-text"></p>
+      <a href="/reader" class="ra-btn">回書架 →</a>
+    </div>
+
+    <div id="closed-screen" class="ra-screen ra-center">
+      <div class="ra-reward-emoji">📚</div>
+      <h1>讀完囉</h1>
+      <p><a href="/reader" class="ra-link">回書架</a></p>
+    </div>
+
+    <div id="error-screen" class="ra-screen ra-center">
+      <div class="ra-reward-emoji">⏳</div>
+      <h1>還沒開始帶讀</h1>
+      <p class="ra-reward-text">跟汪汪說「我想讀英文繪本」就會開始囉！</p>
+      <p><a href="/reader" class="ra-link">回書架</a></p>
+    </div>
+
+    <script src="/static/read_along.js"></script>
+  </body>
+</html>

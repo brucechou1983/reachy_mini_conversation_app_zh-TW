@@ -911,6 +911,21 @@ class OpenaiRealtimeHandler(ConversationHandler):
         except Exception:
             return fallback
 
+    async def inject_user_text(self, text: str, respond: bool = True) -> None:
+        """Inject a user-role text turn into the live session (e.g. a reader tap)."""
+        if not self.connection:
+            logger.debug("No connection, cannot inject user text")
+            return
+        await self.connection.conversation.item.create(
+            item={
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": text}],
+            },
+        )
+        if respond:
+            await self.connection.response.create()
+
     async def send_idle_signal(self, idle_duration: float) -> None:
         """Send an idle signal to the openai server."""
         logger.debug("Sending idle signal")

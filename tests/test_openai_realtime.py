@@ -115,3 +115,76 @@ async def test_start_up_retries_on_abrupt_close(monkeypatch: Any, caplog: Any) -
     # Optional: confirm we logged the abrupt close once
     warnings = [r for r in caplog.records if r.levelname == "WARNING" and "websocket closed" in r.msg]
     assert len(warnings) == 1
+
+
+@pytest.mark.asyncio
+async def test_inject_user_text_creates_item_and_response() -> None:
+    """inject_user_text adds a user message and triggers a response."""
+    handler = _build_handler(asyncio.new_event_loop())
+    try:
+        captured: dict = {}
+
+        class _Item:
+            async def create(self, item: Any = None) -> None:
+                captured["item"] = item
+
+        class _Conversation:
+            item = _Item()
+
+        class _Response:
+            async def create(self, **_kw: Any) -> None:
+                captured["response"] = True
+
+        class _Conn:
+            conversation = _Conversation()
+            response = _Response()
+
+        handler.connection = _Conn()  # type: ignore[assignment]
+        await handler.inject_user_text("讀這個字")
+
+        assert captured["item"]["role"] == "user"
+        assert captured["item"]["content"][0]["text"] == "讀這個字"
+        assert captured["response"] is True
+    finally:
+        asyncio.set_event_loop(None)
+
+
+@pytest.mark.asyncio
+async def test_inject_user_text_no_connection_is_noop() -> None:
+    """No live connection -> inject is a safe no-op."""
+    handler = _build_handler(asyncio.new_event_loop())
+    try:
+        handler.connection = None
+        await handler.inject_user_text("x")  # must not raise
+    finally:
+        asyncio.set_event_loop(None)
+
+
+@pytest.mark.asyncio
+async def test_inject_user_text_respond_false_skips_response() -> None:
+    """respond=False adds the item without creating a response."""
+    handler = _build_handler(asyncio.new_event_loop())
+    try:
+        captured: dict = {"response": False}
+
+        class _Item:
+            async def create(self, item: Any = None) -> None:
+                captured["item"] = item
+
+        class _Conversation:
+            item = _Item()
+
+        class _Response:
+            async def create(self, **_kw: Any) -> None:
+                captured["response"] = True
+
+        class _Conn:
+            conversation = _Conversation()
+            response = _Response()
+
+        handler.connection = _Conn()  # type: ignore[assignment]
+        await handler.inject_user_text("hi", respond=False)
+        assert "item" in captured
+        assert captured["response"] is False
+    finally:
+        asyncio.set_event_loop(None)

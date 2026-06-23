@@ -123,3 +123,28 @@ async def test_receive_without_session_is_noop():
     h = GeminiRealtimeHandler(MagicMock())
     h.session = None
     await h.receive((48000, np.zeros((10, 2), dtype=np.float32)))
+
+
+@pytest.mark.asyncio
+async def test_inject_user_text_sends_to_session():
+    """inject_user_text forwards text to the Gemini live session."""
+    h = GeminiRealtimeHandler(MagicMock())
+    sent: dict = {}
+
+    class FakeSession:
+        async def send(self, input=None, end_of_turn=None):
+            sent["input"] = input
+            sent["end_of_turn"] = end_of_turn
+
+    h.session = FakeSession()
+    await h.inject_user_text("讀這個字", respond=True)
+    assert sent["input"] == "讀這個字"
+    assert sent["end_of_turn"] is True
+
+
+@pytest.mark.asyncio
+async def test_inject_user_text_without_session_is_noop():
+    """No session -> inject is a safe no-op."""
+    h = GeminiRealtimeHandler(MagicMock())
+    h.session = None
+    await h.inject_user_text("x")  # must not raise

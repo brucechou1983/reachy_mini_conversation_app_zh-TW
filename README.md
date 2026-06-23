@@ -37,11 +37,12 @@ Reachy Mini 機器人的對話應用程式，結合 OpenAI 即時語音 API、�
 |------|------|
 | 即時語音對話 | 透過 OpenAI 即時 API 進行低延遲中文語音對話 |
 | 互動說故事 | Google Gemini 產生繪本故事，搭配水彩風格插圖，在平板即時顯示 |
+| 繪本帶讀（Ello 式） | 精選 SEL 情緒主題英文小繪本，小朋友自己讀、汪汪聽並階梯式引導（bounce→highlight→拆音），讀完做情緒對話、給星星 |
 | 舞蹈與情緒動作 | 內建舞蹈庫與情緒動作播放 |
 | 視覺 / 相機 / 臉部追蹤 | 支援 gpt-realtime、SmolVLM2、YOLO、MediaPipe 等多種視覺方案 |
 | 網路搜尋 | 透過 Tavily 即時搜尋網路回答問題 |
 | 長期記憶 | 以 Markdown（Zettelkasten 風格）跨工作階段記住偏好與事實，可由 Gemini 自動整理去重 |
-| 英語學習遊戲 | `english_learner` 角色以 Agent Skills（SKILL.md）提供 6 種互動英語遊戲，專為 4–6 歲設計 |
+| 英語學習遊戲 | `english_learner` 角色以 Agent Skills（SKILL.md）提供 7 種互動英語活動（含繪本帶讀），專為 4–6 歲設計 |
 | 多角色 Profile | 16 個內建角色，也可自訂專屬角色與工具 |
 
 ## 快速上手
@@ -246,6 +247,10 @@ pip install -e .[dev]
 | `story_book_open` | 從繪本書庫開啟已儲存的故事，或列出可用書籍。 | 需要 `GEMINI_API_KEY`。 |
 | `story_book_go_to_page` | 跳到當前故事的指定頁面，並回傳頁面文字。 | 需要正在進行的故事工作階段。 |
 | `story_book_close` | 關閉故事閱讀器，回到一般對話模式。 | 需要正在進行的故事工作階段。 |
+| `read_along_start` | 開始 Ello 式英文繪本帶讀（不帶參數則列出精選 SEL 繪本）。 | 僅需基本安裝（插圖需 `GEMINI_API_KEY`）。 |
+| `read_along_cue` | 在閱讀器上標記單字：miss（自動跳動→highlight→拆音）、success、sound_out、clear。 | 需要正在進行的帶讀工作階段。 |
+| `read_along_next_page` | 小朋友讀完一頁後翻到下一頁。 | 需要正在進行的帶讀工作階段。 |
+| `read_along_finish` | 結束帶讀並顯示星星獎勵畫面。 | 需要正在進行的帶讀工作階段。 |
 | `do_nothing` | 明確保持閒置。 | 僅需基本安裝。 |
 
 ## 互動說故事（詳細版）
@@ -269,6 +274,10 @@ pip install -e .[dev]
 | `GET /reader/api/books` | 列出書庫中所有已儲存的書籍。 |
 | `GET /reader/api/books/{book_id}/download` | 以 ZIP 壓縮檔下載書籍。 |
 | `DELETE /reader/api/books/{book_id}` | 從書庫刪除書籍。 |
+| `GET /reader/read-along/{book_id}` | 繪本帶讀閱讀器介面（Ello 式，逐字互動）。 |
+| `GET /reader/read-along/events` | 帶讀的 SSE 串流（翻頁、單字狀態、星星）。 |
+| `GET /reader/read-along/state` | 當前帶讀工作階段的 JSON 快照。 |
+| `POST /reader/read-along/tap` | 小朋友點選某個單字求助（觸發汪汪拆音）。 |
 
 ### 說故事人 Profile
 
@@ -301,8 +310,8 @@ LLM 透過 `save_memory` / `forget_memory`（全域）與 `save_profile_memory` 
 1. 啟動時 `skills.py` 掃描 `profiles/english_learner/skills/` 下每個含 `SKILL.md` 的資料夾，把名稱與描述彙整成「可用遊戲技能」目錄，附加到系統提示。
 2. 小朋友選遊戲後，LLM 呼叫 profile 專屬的 `activate_skill` 工具載入該 `SKILL.md` 的完整規則，並以之引導接下來的對話。
 
-### 內建 6 種遊戲
-| 遊戲 | 內容 |
+### 內建 7 種活動
+| 活動 | 內容 |
 |------|------|
 | `color-detective` | 顏色偵探：用相機在房間找顏色，教英文顏色單字。 |
 | `simon-says` | 機器人老大說（Simon Says）：用肢體動作教英文動作詞與身體部位。 |
@@ -310,9 +319,35 @@ LLM 透過 `save_memory` / `forget_memory`（全域）與 `save_profile_memory` 
 | `emotion-mirror` | 情緒鏡子：用表情互相模仿，教英文情緒單字。 |
 | `photo-hunt` | 拍照大冒險：用形容詞任務找東西拍照學單字。 |
 | `story-builder` | 魔法故事書：用英文選角色與場景，一起創作故事。 |
+| `read-with-me` | 繪本帶讀（Ello 式）：小朋友自己讀精選 SEL 英文繪本，汪汪聽並引導。見下節。 |
 
 ### 新增遊戲
 只需在 `profiles/english_learner/skills/<game-name>/` 新增一個含 YAML frontmatter（`name`、`description`）的 `SKILL.md`，即會自動被發現並出現在目錄中，無需改任何程式碼。詳見 [`docs/english_learner_guide.md`](docs/english_learner_guide.md)。
+
+## 繪本帶讀（Ello 式 SEL 英文繪本）
+
+借鑑 [Ello](https://ello.com) 的閱讀帶讀法：**小朋友自己讀、汪汪在旁邊聽並引導**，不是機器人把整本唸完。讀物是**手寫精選、SEL（社會情緒學習）主題**的英文小繪本（不用 LLM 隨機生成），讓讀英文的同時學情緒。
+
+### 帶讀流程（與 Ello 一致）
+1. 汪汪用 `read_along_start` 列出繪本，讓小朋友挑一本（情緒主題）。
+2. 打開閱讀器（`/reader/read-along/<book_id>`），顯示背景插圖 + 前景大字。
+3. **暖身**目標單字 → 邀請小朋友讀這一頁。
+4. 讀對 → 稱讚 + 單字打勾（`read_along_cue` success）→ 翻頁（`read_along_next_page`）。
+5. 卡住 → 階梯式引導：第 1 次 **bounce（跳動）**、第 2 次 **highlight（標示）**、第 3 次/點字 **sound-out（拆音）** → 示範念整個字（`read_along_cue` miss 會自動升級）。
+6. **永遠不說「錯」**；每頁讀完做一個開放式**情緒/理解對話**。
+7. 讀完整本 → `read_along_finish` 給星星獎勵。
+8. 小朋友也可以**直接用手點閱讀器上的單字**求助，汪汪就會幫他拆音。
+
+### 內建繪本（SEL 主題）
+| 繪本 | 主題 |
+|------|------|
+| `My Big Feelings` | 認識與命名情緒（happy / sad / mad / scared） |
+| `I Can Calm Down` | 情緒自我調節（深呼吸冷靜法） |
+| `We Are Kind` | 善良與同理（分享、幫忙、道歉、擁抱） |
+
+繪本文字是精選手寫；插圖在首次開啟時用 Gemini 影像模型產生並快取到書庫（`~/.reachy_mini/books/`，可用 `STORY_BOOKS_DIR` 覆寫）。**沒有 `GEMINI_API_KEY` 也能用**，只是改為純文字（無插圖）。新增繪本只需在 `read_along_books.py` 加一筆。
+
+> 啟用方式：設定 `REACHY_MINI_CUSTOM_PROFILE=english_learner`，跟汪汪說「我想讀英文繪本」即可開始。
 
 ## 自訂 Profile
 建立自訂 profile，搭配專屬指令與工具組合！

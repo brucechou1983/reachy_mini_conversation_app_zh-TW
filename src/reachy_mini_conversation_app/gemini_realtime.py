@@ -319,6 +319,13 @@ class GeminiRealtimeHandler(ConversationHandler):
             self.last_activity_time = asyncio.get_event_loop().time()
         return await wait_for_item(self.output_queue)  # type: ignore[no-any-return]
 
+    async def inject_user_text(self, text: str, respond: bool = True) -> None:
+        """Inject a user text turn into the live session (e.g. a reader tap)."""
+        if not self.session:
+            logger.debug("No session, cannot inject user text")
+            return
+        await self.session.send(input=text, end_of_turn=respond)
+
     async def send_idle_signal(self, idle_duration: float) -> None:
         """Nudge Gemini to do something autonomous after a period of silence."""
         if not self.session:
