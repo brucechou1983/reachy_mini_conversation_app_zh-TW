@@ -23,6 +23,7 @@ ENGLISH_LEARNER_SKILLS = {
     "emotion-mirror",
     "photo-hunt",
     "story-builder",
+    "read-with-me",
 }
 
 
@@ -144,7 +145,7 @@ class TestScanSkills:
 
 
 class TestEnglishLearnerProfile:
-    def test_six_skills_discovered(self):
+    def test_all_skills_discovered(self):
         names = {e.name for e in scan_skills("english_learner")}
         assert names == ENGLISH_LEARNER_SKILLS
 

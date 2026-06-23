@@ -10,15 +10,23 @@ from typing import Any, AsyncIterator
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
 from fastapi.responses import Response, FileResponse, JSONResponse, StreamingResponse
 
 from .story_store import StoryStore
 from .book_library import BookLibrary, _validate_book_id
+from .read_along_store import STATE_SOUND_OUT, ReadAlongStore
 
 
 logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent / "static"
+
+
+class TapPayload(BaseModel):
+    """Body for a read-along word tap: the tapped word's index on the page."""
+
+    index: int
 
 
 def mount_story_routes(app: FastAPI) -> None:
@@ -208,3 +216,95 @@ def mount_story_routes(app: FastAPI) -> None:
             "current_page": story.current_page,
             "pages": pages,
         }
+
+    # ------------------------------------------------------------------ #
+    # Read-along (Ello-style SEL picture books): child reads, robot coaches
+    # ------------------------------------------------------------------ #
+    # NOTE: declare the specific paths before the /{book_id} catch-all so
+    # "events"/"state"/"tap" are not swallowed as book ids.
+
+    @app.get("/reader/read-along/events")
+    async def _read_along_events() -> StreamingResponse:
+        return StreamingResponse(
+            read_along_event_stream(ReadAlongStore.get()),
+            media_type="text/event-stream",
+        )
+
+    @app.get("/reader/read-along/state")
+    def _read_along_state() -> JSONResponse:
+        store = ReadAlongStore.get()
+        snap = store.snapshot()
+        if snap is None:
+            return JSONResponse({"error": "no_session"}, status_code=404)
+        library = BookLibrary.get()
+        book_id = str(snap["book_id"])
+        page = int(snap["page"])
+        has_img = library.page_image_path(book_id, page) is not None
+        snap["image_url"] = (
+            f"/reader/api/books/{book_id}/pages/{page}/image" if has_img else None
+        )
+        return JSONResponse(snap)
+
+    @app.post("/reader/read-along/tap")
+    async def _read_along_tap(payload: TapPayload) -> JSONResponse:
+        store = ReadAlongStore.get()
+        session = store.session
+        if session is None:
+            return JSONResponse({"error": "no_session"}, status_code=404)
+        words = session.current_words
+        if payload.index < 0 or payload.index >= len(words):
+            return JSONResponse({"error": "bad_index"}, status_code=400)
+        word = words[payload.index]
+        # Immediate UI feedback regardless of whether the robot is reachable.
+        store.cue(payload.index, STATE_SOUND_OUT)
+        _inject_tap(store, word)
+        return JSONResponse({"ok": True, "index": payload.index, "word": word})
+
+    @app.get("/reader/read-along/{book_id}")
+    def _read_along_page(book_id: str) -> FileResponse:
+        _check_book_id(book_id)
+        return FileResponse(str(STATIC_DIR / "read_along.html"))
+
+
+async def read_along_event_stream(store: ReadAlongStore) -> AsyncIterator[str]:
+    """Yield SSE payloads for the read-along reader: snapshot, then live events."""
+    q = store.subscribe()
+    try:
+        snap = store.snapshot()
+        if snap is not None:
+            yield f"data: {json.dumps(snap)}\n\n"
+        while True:
+            try:
+                data = await asyncio.wait_for(q.get(), timeout=30)
+                yield f"data: {json.dumps(data)}\n\n"
+            except asyncio.TimeoutError:
+                yield f"data: {json.dumps({'event': 'heartbeat'})}\n\n"
+    except asyncio.CancelledError:
+        pass
+    finally:
+        store.unsubscribe(q)
+
+
+def _inject_tap(store: ReadAlongStore, word: str) -> None:
+    """Best-effort: ask the bound robot handler to sound out a tapped word."""
+    handler = store.handler
+    if handler is None or not hasattr(handler, "inject_user_text"):
+        return
+    text = (
+        f"[小朋友在繪本上點了單字「{word}」，請溫柔地幫他把這個字一個音一個音拆音念出來，"
+        "再把整個字清楚念一次示範。]"
+    )
+    coro = handler.inject_user_text(text)
+    loop = store.loop
+    try:
+        running: asyncio.AbstractEventLoop | None = asyncio.get_running_loop()
+    except RuntimeError:
+        running = None
+    try:
+        if loop is not None and loop is not running:
+            asyncio.run_coroutine_threadsafe(coro, loop)
+        else:
+            asyncio.ensure_future(coro)
+    except Exception as e:  # pragma: no cover - defensive
+        logger.warning("read-along tap injection failed: %s", e)
+        coro.close()

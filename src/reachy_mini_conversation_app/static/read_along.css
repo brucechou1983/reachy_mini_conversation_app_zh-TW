@@ -1,0 +1,313 @@
+:root {
+  --ra-bg: #1a1520;
+  --ra-text: #f7efe2;
+  --ra-accent: #ffd166;
+  --ra-muted: rgba(247, 239, 226, 0.65);
+  --ra-amber: #ffb648;
+  --ra-amber-soft: rgba(255, 182, 72, 0.22);
+  --ra-green: #7bd88f;
+  --ra-green-soft: rgba(123, 216, 143, 0.25);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: "Noto Sans TC", "Microsoft JhengHei", "Segoe UI", sans-serif;
+  background: var(--ra-bg);
+  color: var(--ra-text);
+  min-height: 100vh;
+  overflow: hidden;
+}
+
+.ra-screen {
+  display: none;
+  position: fixed;
+  inset: 0;
+}
+
+.ra-screen.active {
+  display: block;
+}
+
+.ra-center {
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  background: radial-gradient(circle at 50% 35%, #2a1f3d, var(--ra-bg));
+  padding: 24px;
+}
+
+.ra-screen.ra-center.active {
+  display: flex;
+}
+
+/* ---- Background illustration ---- */
+.ra-bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: saturate(1.05);
+  transition: opacity 0.6s ease;
+}
+
+.ra-bg[src=""],
+.ra-bg:not([src]) {
+  display: none;
+}
+
+.ra-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to bottom,
+    rgba(15, 12, 20, 0.35) 0%,
+    rgba(15, 12, 20, 0.15) 35%,
+    rgba(15, 12, 20, 0.78) 100%
+  );
+}
+
+/* ---- Top bar ---- */
+.ra-top {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 22px;
+  font-size: 16px;
+  z-index: 3;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+}
+
+.ra-title {
+  font-weight: 700;
+  color: var(--ra-accent);
+}
+
+.ra-progress {
+  color: var(--ra-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.ra-stars {
+  font-size: 20px;
+  letter-spacing: 2px;
+  min-width: 40px;
+  text-align: right;
+}
+
+/* ---- Reading stage ---- */
+.ra-stage {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0 24px 132px;
+}
+
+.ra-words {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 10px 14px;
+  max-width: 920px;
+}
+
+.word {
+  display: inline-block;
+  font-size: clamp(34px, 7vw, 68px);
+  font-weight: 800;
+  line-height: 1.1;
+  padding: 6px 14px;
+  border-radius: 14px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.18);
+  text-shadow: 0 3px 10px rgba(0, 0, 0, 0.55);
+  cursor: pointer;
+  transition: transform 0.15s ease, background 0.2s ease, color 0.2s ease;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.word:hover {
+  background: rgba(0, 0, 0, 0.32);
+}
+
+/* 1st miss — gentle bounce flag */
+.word.bounce {
+  animation: word-bounce 0.6s ease infinite;
+  color: var(--ra-amber);
+}
+
+/* 2nd miss — point to the word */
+.word.highlight {
+  background: var(--ra-amber-soft);
+  color: var(--ra-amber);
+  outline: 3px solid var(--ra-amber);
+  outline-offset: 2px;
+}
+
+/* tap / 3rd miss — sound it out */
+.word.sound_out {
+  background: var(--ra-amber-soft);
+  color: #fff;
+  outline: 3px dashed var(--ra-amber);
+  outline-offset: 2px;
+  letter-spacing: 4px;
+  animation: word-pulse 1s ease infinite;
+}
+
+.word.sound_out::after {
+  content: " 🔊";
+  font-size: 0.6em;
+  letter-spacing: normal;
+}
+
+/* read correctly */
+.word.success {
+  background: var(--ra-green-soft);
+  color: var(--ra-green);
+  outline: none;
+  animation: word-pop 0.4s ease;
+}
+
+.word.success::after {
+  content: " ✓";
+  font-size: 0.6em;
+  color: var(--ra-green);
+}
+
+.ra-prompt {
+  margin-top: 22px;
+  font-size: clamp(15px, 3vw, 20px);
+  color: var(--ra-muted);
+  max-width: 700px;
+  text-align: center;
+  min-height: 1.4em;
+}
+
+/* ---- Your-turn banner ---- */
+.ra-banner {
+  position: absolute;
+  left: 50%;
+  bottom: 40px;
+  transform: translateX(-50%);
+  z-index: 3;
+  background: var(--ra-accent);
+  color: #2a1c00;
+  font-weight: 800;
+  font-size: 18px;
+  padding: 12px 26px;
+  border-radius: 999px;
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.45);
+  animation: banner-float 2.2s ease-in-out infinite;
+}
+
+/* ---- Reward screen ---- */
+.ra-reward-emoji {
+  font-size: 84px;
+  margin-bottom: 12px;
+  animation: word-pop 0.6s ease;
+}
+
+.ra-reward-stars {
+  font-size: 56px;
+  letter-spacing: 10px;
+  margin-bottom: 12px;
+  color: var(--ra-accent);
+}
+
+.ra-center h1 {
+  font-size: 34px;
+  color: var(--ra-accent);
+  margin-bottom: 14px;
+}
+
+.ra-reward-text {
+  font-size: 20px;
+  color: var(--ra-text);
+  max-width: 520px;
+  line-height: 1.6;
+  margin-bottom: 26px;
+}
+
+.ra-btn {
+  display: inline-block;
+  background: var(--ra-accent);
+  color: #2a1c00;
+  font-weight: 700;
+  text-decoration: none;
+  padding: 12px 28px;
+  border-radius: 999px;
+}
+
+.ra-link {
+  color: var(--ra-accent);
+}
+
+/* ---- Animations ---- */
+@keyframes word-bounce {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-12px);
+  }
+}
+
+@keyframes word-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.07);
+  }
+}
+
+@keyframes word-pop {
+  0% {
+    transform: scale(0.7);
+  }
+  60% {
+    transform: scale(1.18);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes banner-float {
+  0%,
+  100% {
+    transform: translateX(-50%) translateY(0);
+  }
+  50% {
+    transform: translateX(-50%) translateY(-6px);
+  }
+}
+
+@media (max-width: 600px) {
+  .ra-stage {
+    padding-bottom: 110px;
+  }
+  .ra-banner {
+    bottom: 26px;
+    font-size: 16px;
+  }
+}

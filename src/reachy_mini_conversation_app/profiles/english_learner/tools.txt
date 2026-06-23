@@ -17,6 +17,12 @@ story_book_create
 story_book_go_to_page
 story_book_close
 
+# === 繪本帶讀工具 (Ello 式，shared) ===
+read_along_start
+read_along_cue
+read_along_next_page
+read_along_finish
+
 # === 記憶工具 (shared) ===
 save_memory
 forget_memory
