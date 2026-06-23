@@ -6,13 +6,13 @@ left untouched.
 """
 
 from __future__ import annotations
-
 import json
-import logging
 import uuid
+import logging
 from typing import TYPE_CHECKING
 
 from reachy_mini_conversation_app.memory import MemoryEntry, _now_iso
+
 
 if TYPE_CHECKING:
     from reachy_mini_conversation_app.memory import MarkdownMemoryStore
@@ -69,7 +69,7 @@ async def _call_gemini(api_key: str, prompt: str) -> str:
                 temperature=0.2,
             ),
         )
-        return response.text
+        return response.text or ""
     finally:
         await client.aio.aclose()
 

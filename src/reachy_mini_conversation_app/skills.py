@@ -5,6 +5,7 @@ import logging
 from pathlib import Path
 from dataclasses import dataclass
 
+
 logger = logging.getLogger(__name__)
 
 PROFILES_DIR = Path(__file__).parent / "profiles"
@@ -13,12 +14,14 @@ PROFILES_DIR = Path(__file__).parent / "profiles"
 @dataclass
 class SkillEntry:
     """A discovered skill with its metadata."""
+
     name: str
     description: str
     skill_dir: Path
 
     @property
     def skill_md_path(self) -> Path:
+        """Return the path to this skill's SKILL.md file."""
         return self.skill_dir / "SKILL.md"
 
     def load_body(self) -> str:
@@ -73,7 +76,7 @@ def format_catalog(entries: list[SkillEntry]) -> str:
 
 
 def _extract_yaml_field(frontmatter: str, field: str) -> str | None:
-    """Simple YAML field extraction (no full parser needed)."""
+    """Extract a single-line YAML field value (no full parser needed)."""
     match = re.search(rf"^{field}:\s*(.+)$", frontmatter, re.MULTILINE)
     if match:
         value = match.group(1).strip()

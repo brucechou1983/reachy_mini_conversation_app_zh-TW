@@ -1,14 +1,14 @@
 """Tool to capture a photo from the robot's camera and save it as PNG."""
 
-import logging
-import asyncio
-import platform
-import shutil
-import subprocess
 import time
+import shutil
+import asyncio
+import logging
+import platform
+import subprocess
+from typing import Any, Dict, List, Optional, cast
 from pathlib import Path
 from datetime import datetime
-from typing import Any, Dict, List, Optional
 
 import cv2
 import numpy as np
@@ -182,6 +182,7 @@ class TakePhoto(Tool):
             deps.head_wobbler.reset()
 
         if was_tracking:
+            assert deps.camera_worker is not None
             deps.camera_worker.set_head_tracking_enabled(False)
 
         settled = await asyncio.to_thread(
@@ -195,6 +196,7 @@ class TakePhoto(Tool):
         logger.info("Unfreezing robot after photo capture")
         deps.movement_manager.unfreeze()
         if was_tracking:
+            assert deps.camera_worker is not None
             deps.camera_worker.set_head_tracking_enabled(True)
 
     # ------------------------------------------------------------------
@@ -212,6 +214,8 @@ class TakePhoto(Tool):
         Falls back to software brightness correction if no UVC tool is
         available.
         """
+        camera_worker = deps.camera_worker
+        assert camera_worker is not None
         try:
             camera = deps.reachy_mini.media.camera
             if camera is None:
@@ -243,10 +247,10 @@ class TakePhoto(Tool):
             else:
                 logger.info("No UVC tool found; will use software brightness correction")
                 # Grab reference frame for software fallback.
-                ref_frame = deps.camera_worker.get_latest_frame()
+                ref_frame = camera_worker.get_latest_frame()
 
             # --- stop camera_worker so we have exclusive access ---
-            deps.camera_worker.stop()
+            camera_worker.stop()
 
             logger.info(
                 "Switching camera %dx%d -> %dx%d for photo capture",
@@ -288,7 +292,7 @@ class TakePhoto(Tool):
             logger.info(
                 "High-res frame captured: %dx%d", frame.shape[1], frame.shape[0],
             )
-            return frame
+            return cast(NDArray[np.uint8], frame)
 
         except Exception as e:
             logger.warning("High-res capture failed, using buffered frame: %s", e)
@@ -313,7 +317,7 @@ class TakePhoto(Tool):
             except Exception as e:
                 logger.warning("Failed to restore camera resolution: %s", e)
 
-            deps.camera_worker.start()
+            camera_worker.start()
 
     @staticmethod
     def _match_brightness(
@@ -347,4 +351,4 @@ class TakePhoto(Tool):
 
         corrected = dark.astype(np.float32) * gain.astype(np.float32)
         np.clip(corrected, 0, 255, out=corrected)
-        return corrected.astype(np.uint8)
+        return cast(NDArray[np.uint8], corrected.astype(np.uint8))

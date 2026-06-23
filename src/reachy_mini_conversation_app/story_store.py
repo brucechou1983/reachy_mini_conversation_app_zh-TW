@@ -1,13 +1,12 @@
 """In-process store for story state and SSE fan-out."""
 
 from __future__ import annotations
-
+import uuid
 import asyncio
 import logging
 import threading
-import uuid
-from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
+from dataclasses import field, dataclass
 
 
 logger = logging.getLogger(__name__)
@@ -44,11 +43,13 @@ class StoryStore:
     _lock: threading.Lock = threading.Lock()
 
     def __init__(self) -> None:
+        """Initialize with no active story and an empty subscriber list."""
         self._story: Optional[Story] = None
         self._subscribers: List[asyncio.Queue[Dict[str, Any]]] = []
 
     @classmethod
     def get(cls) -> StoryStore:
+        """Return the singleton instance, creating it on first call."""
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
@@ -57,15 +58,18 @@ class StoryStore:
 
     @property
     def story(self) -> Optional[Story]:
+        """Return the currently active story, or None."""
         return self._story
 
     def create_story(self, title: str) -> Story:
+        """Create a new story, set it active, and broadcast 'generating'."""
         story = Story(id=str(uuid.uuid4()), title=title)
         self._story = story
         self._broadcast({"event": "generating", "title": title})
         return story
 
     def set_story_ready(self, story_id: str, pages: List[StoryPage]) -> None:
+        """Attach generated pages, mark ready, and broadcast 'story_ready'."""
         if self._story and self._story.id == story_id:
             self._story.pages = pages
             self._story.status = "ready"
@@ -77,6 +81,7 @@ class StoryStore:
             })
 
     def go_to_page(self, page: int) -> Optional[StoryPage]:
+        """Set the current page (clamped) and broadcast a page change."""
         if not self._story or not self._story.pages:
             return None
         page = max(0, min(page, len(self._story.pages) - 1))
@@ -104,6 +109,7 @@ class StoryStore:
         })
 
     def close_story(self) -> None:
+        """Mark the story closed, broadcast 'story_closed', and clear it."""
         if self._story:
             self._story.status = "closed"
         self._broadcast({"event": "story_closed"})
@@ -112,11 +118,13 @@ class StoryStore:
     # --- SSE fan-out ---
 
     def subscribe(self) -> asyncio.Queue[Dict[str, Any]]:
+        """Register and return a new queue for receiving SSE events."""
         q: asyncio.Queue[Dict[str, Any]] = asyncio.Queue()
         self._subscribers.append(q)
         return q
 
     def unsubscribe(self, q: asyncio.Queue[Dict[str, Any]]) -> None:
+        """Remove a previously subscribed queue from the fan-out list."""
         try:
             self._subscribers.remove(q)
         except ValueError:

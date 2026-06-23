@@ -70,10 +70,12 @@ class StoryBookCreate(Tool):
     }
 
     def is_available(self) -> bool:
+        """Return True only when a Gemini API key is configured."""
         key = getattr(config, "GEMINI_API_KEY", None)
         return bool(key and str(key).strip())
 
     async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
+        """Kick off background story generation and return immediately."""
         theme = kwargs.get("theme", "一個有趣的故事")
         num_pages = kwargs.get("num_pages", DEFAULT_NUM_PAGES)
         num_pages = max(4, min(99, int(num_pages)))
@@ -206,7 +208,7 @@ async def _generate_story_text(api_key: str, theme: str, num_pages: int = DEFAUL
         )
 
         text = response.text
-        parsed = json.loads(text)
+        parsed = json.loads(text or "")
         pages = parsed.get("pages", [])
         if len(pages) != num_pages:
             logger.warning("Expected %d pages, got %d", num_pages, len(pages))
@@ -245,20 +247,20 @@ async def _generate_illustration(
                     response_modalities=["TEXT", "IMAGE"],
                     safety_settings=[
                         types.SafetySetting(
-                            category="HARM_CATEGORY_DANGEROUS_CONTENT",
-                            threshold="BLOCK_ONLY_HIGH",
+                            category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                            threshold=types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
                         ),
                         types.SafetySetting(
-                            category="HARM_CATEGORY_HARASSMENT",
-                            threshold="BLOCK_ONLY_HIGH",
+                            category=types.HarmCategory.HARM_CATEGORY_HARASSMENT,
+                            threshold=types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
                         ),
                         types.SafetySetting(
-                            category="HARM_CATEGORY_HATE_SPEECH",
-                            threshold="BLOCK_ONLY_HIGH",
+                            category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                            threshold=types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
                         ),
                         types.SafetySetting(
-                            category="HARM_CATEGORY_SEXUALLY_EXPLICIT",
-                            threshold="BLOCK_ONLY_HIGH",
+                            category=types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                            threshold=types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
                         ),
                     ],
                 ),
@@ -269,7 +271,7 @@ async def _generate_illustration(
                 candidate = response.candidates[0]
                 if candidate.content and candidate.content.parts:
                     for part in candidate.content.parts:
-                        if part.inline_data is not None:
+                        if part.inline_data is not None and part.inline_data.data is not None:
                             mime = part.inline_data.mime_type or "image/png"
                             image_bytes = part.inline_data.data
                             image_b64 = base64.b64encode(image_bytes).decode("ascii")

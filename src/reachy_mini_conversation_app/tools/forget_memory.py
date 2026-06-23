@@ -5,6 +5,7 @@ from typing import Any, Dict
 
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -29,9 +30,11 @@ class ForgetMemory(Tool):
     }
 
     def is_available(self) -> bool:
+        """Return True; this tool is always enabled."""
         return True
 
     async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
+        """Remove the memory with the given id from long-term storage."""
         memory_id = kwargs.get("memory_id", "").strip()
         if not memory_id:
             return {"error": "memory_id is required"}

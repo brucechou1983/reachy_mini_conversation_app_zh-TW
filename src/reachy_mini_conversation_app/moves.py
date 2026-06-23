@@ -50,7 +50,6 @@ from reachy_mini.utils.interpolation import (
     compose_world_offset,
     linear_pose_interpolation,
 )
-
 from reachy_mini_conversation_app.dance_emotion_moves import GotoQueueMove
 
 
