@@ -82,6 +82,23 @@ cd reachy_mini_conversation_app_zh-TW
 
 > ⚠️ AI Studio **免費層**：單段語音上限 15 分鐘（app 會自動重連續接），且**對話可能被 Google 用於改善模型**——兒童資料請改用付費層或 Vertex AI。
 
+**在 macOS Desktop App 設定 Flash 3（AI Studio）**
+
+到 [aistudio.google.com](https://aistudio.google.com) 取得 API key（免費層不需信用卡）。Desktop App 啟動的 app 會繼承 GUI session 的環境變數，所以用 `launchctl setenv` 設定，**然後完全結束（Cmd+Q）並重開 Desktop App** 才會生效：
+
+```bash
+launchctl setenv HANDLER_TYPE gemini
+launchctl setenv GOOGLE_GENAI_USE_VERTEXAI false
+launchctl setenv GEMINI_API_KEY <你的_AI_STUDIO_KEY>
+launchctl setenv GEMINI_LIVE_MODEL_NAME gemini-3.1-flash-live-preview
+launchctl setenv REACHY_MINI_CUSTOM_PROFILE english_learner   # 選填：啟用英文學習遊戲
+# 切回 Vertex 時改用：launchctl setenv GOOGLE_GENAI_USE_VERTEXAI true（並設好 GOOGLE_CLOUD_PROJECT）
+```
+
+啟動後 app log 應顯示 `Gemini Live starting (AI Studio, model=gemini-3.1-flash-live-preview)`。
+
+> 本機 CLI 開發：把同樣的變數寫進專案根目錄的 `.env`（參考 `.env.example`）即可，不需 `launchctl`。
+
 
 ### 4. 故事閱讀器
 
