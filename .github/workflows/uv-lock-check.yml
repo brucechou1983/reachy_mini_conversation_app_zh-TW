@@ -12,3 +12,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: hbelmiro/uv-lock-check@v0.2.0
+        with:
+          # Only verify the lock is in sync; the default "uv sync" would try to
+          # build PyGObject/pycairo (needs system cairo) and fail.
+          command: "uv lock --check"

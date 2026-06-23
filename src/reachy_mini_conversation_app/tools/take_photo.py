@@ -217,7 +217,11 @@ class TakePhoto(Tool):
         camera_worker = deps.camera_worker
         assert camera_worker is not None
         try:
-            camera = deps.reachy_mini.media.camera
+            # The direct camera object (with UVC control / resolution switching)
+            # only exists on older Reachy Mini SDKs. On 1.8+ the media manager
+            # exposes only get_frame(), so high-res capture is unavailable and
+            # the caller falls back to the buffered stream frame.
+            camera = getattr(deps.reachy_mini.media, "camera", None)
             if camera is None:
                 return None
 
@@ -301,7 +305,7 @@ class TakePhoto(Tool):
         finally:
             # Restore original resolution, UVC controls, and restart camera_worker.
             try:
-                camera = deps.reachy_mini.media.camera
+                camera = getattr(deps.reachy_mini.media, "camera", None)
                 if camera is not None:
                     original_res = camera.camera_specs.default_resolution
                     camera.set_resolution(original_res)
