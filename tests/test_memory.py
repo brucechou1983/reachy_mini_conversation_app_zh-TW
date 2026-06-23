@@ -186,6 +186,27 @@ class TestMarkdownMemoryStore:
         assert "memory_1" not in contents
         assert "memory_6" in contents
 
+    def test_eviction_counts_across_fact_and_event_dirs(
+        self, store: MarkdownMemoryStore
+    ):
+        # max_memories=5. Capacity spans both dirs, so the oldest entries are
+        # evicted regardless of type — here the two oldest are events.
+        for i in range(4):
+            store.add(f"event_{i}", memory_type="event")
+        for i in range(3):
+            store.add(f"fact_{i}", memory_type="fact")
+
+        entries = store.list_all()
+        assert len(entries) == 5
+        contents = [e["content"] for e in entries]
+        # Two oldest (events) evicted, proving eviction is not fact-only.
+        assert "event_0" not in contents
+        assert "event_1" not in contents
+        assert "event_2" in contents
+        assert "event_3" in contents
+        # All facts (added later) survive.
+        assert {"fact_0", "fact_1", "fact_2"}.issubset(set(contents))
+
     def test_get_entries_returns_typed(self, store: MarkdownMemoryStore):
         store.add("test", memory_type="fact")
         entries = store.get_entries()
@@ -263,6 +284,16 @@ class TestFactoryMethods:
         store = MarkdownMemoryStore.for_profile("storyteller", instance_path=tmp_path)
         assert "storyteller" in str(store._facts_dir)
         assert store._facts_dir.exists()
+
+    def test_for_profile_prompt_header(self, tmp_path: Path):
+        store = MarkdownMemoryStore.for_profile("storyteller", instance_path=tmp_path)
+        store.add("小明完成了三道加法題", memory_type="event")
+
+        prompt = store.format_for_prompt()
+        # Profile stores use a profile-scoped header, distinct from the global one.
+        assert "## 角色記憶（storyteller）" in prompt
+        assert "## 長期記憶" not in prompt
+        assert "小明完成了三道加法題" in prompt
 
     def test_backward_compat_alias(self):
         assert MemoryStore is MarkdownMemoryStore

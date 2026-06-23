@@ -89,3 +89,57 @@ class TestConsolidation:
 
         # Original entries should still be intact (no replace_entries called)
         assert len(store.list_all()) == 20
+
+    @pytest.mark.asyncio
+    async def test_non_list_response_skips(self, store: MarkdownMemoryStore):
+        """Valid JSON that isn't a list should be ignored, leaving facts intact."""
+        _add_facts(store, 20)
+
+        # Gemini returns a JSON object instead of the required array.
+        mock_call = AsyncMock(return_value=json.dumps({"facts": ["a", "b"]}))
+
+        with patch(
+            "reachy_mini_conversation_app.memory_consolidation._call_gemini",
+            mock_call,
+        ):
+            result = await consolidate_memories(store, api_key="fake-key", threshold=15)
+
+        assert result is False
+        # Nothing replaced — all 20 original facts remain.
+        assert len(store.list_all()) == 20
+
+    @pytest.mark.asyncio
+    async def test_malformed_json_raises_and_preserves(self, store: MarkdownMemoryStore):
+        """Non-JSON output should propagate as an error and not wipe memories."""
+        _add_facts(store, 20)
+
+        mock_call = AsyncMock(return_value="not json at all {[")
+
+        with patch(
+            "reachy_mini_conversation_app.memory_consolidation._call_gemini",
+            mock_call,
+        ):
+            with pytest.raises(json.JSONDecodeError):
+                await consolidate_memories(store, api_key="fake-key", threshold=15)
+
+        # replace_entries must not have run.
+        assert len(store.list_all()) == 20
+
+    @pytest.mark.asyncio
+    async def test_blank_entries_filtered(self, store: MarkdownMemoryStore):
+        """Empty / whitespace-only merged facts are dropped, not stored."""
+        _add_facts(store, 20)
+
+        mock_call = AsyncMock(
+            return_value=json.dumps(["real fact", "   ", "", "another fact"])
+        )
+
+        with patch(
+            "reachy_mini_conversation_app.memory_consolidation._call_gemini",
+            mock_call,
+        ):
+            result = await consolidate_memories(store, api_key="fake-key", threshold=15)
+
+        assert result is True
+        facts = [e for e in store.get_entries() if e.type == "fact"]
+        assert {f.content for f in facts} == {"real fact", "another fact"}

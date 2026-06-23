@@ -250,8 +250,7 @@ class MarkdownMemoryStore:
         )
 
         with self._lock:
-            target_dir = self._facts_dir if memory_type == "fact" else self._events_dir
-            self._write_entry(target_dir, entry)
+            self._write_entry(self._dir_for_type(memory_type), entry)
 
             # Evict oldest when over capacity
             all_entries = self._read_all_unlocked()
@@ -296,8 +295,7 @@ class MarkdownMemoryStore:
                 md.unlink()
             # Write new entries
             for entry in entries:
-                target_dir = self._facts_dir if entry.type == "fact" else self._events_dir
-                self._write_entry(target_dir, entry)
+                self._write_entry(self._dir_for_type(entry.type), entry)
 
     def format_for_prompt(self) -> str:
         """Format all memories into a text block suitable for the system prompt.

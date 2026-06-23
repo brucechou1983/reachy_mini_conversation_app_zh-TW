@@ -41,7 +41,7 @@ class SaveProfileMemory(Tool):
 
     async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
         content = kwargs.get("content", "").strip()
-        memory_type = kwargs.get("memory_type", "summary")
+        memory_type = kwargs.get("memory_type", "fact")
 
         if not content:
             return {"error": "content is required"}
