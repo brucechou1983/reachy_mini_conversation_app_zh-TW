@@ -23,9 +23,9 @@ from scipy.signal import resample
 from reachy_mini import ReachyMini
 from reachy_mini.media.media_manager import MediaBackend
 from reachy_mini_conversation_app.config import config
+from reachy_mini_conversation_app.story_routes import mount_story_routes
 from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
 from reachy_mini_conversation_app.headless_personality_ui import mount_personality_routes
-from reachy_mini_conversation_app.story_routes import mount_story_routes
 
 
 try:
@@ -453,7 +453,7 @@ class LocalStream:
                     "timestamp": int(stat.st_mtime),
                     "size": stat.st_size,
                 })
-            photos.sort(key=lambda x: x["filename"], reverse=True)
+            photos.sort(key=lambda x: str(x["filename"]), reverse=True)
             return JSONResponse(photos)
 
         @self._settings_app.get("/photos/{filename}")

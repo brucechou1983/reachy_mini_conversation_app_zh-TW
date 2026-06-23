@@ -1,15 +1,15 @@
 """Tool: story_book_open - Load a persisted book from the library and open the reader."""
 
 from __future__ import annotations
-
 import base64
 import logging
 import webbrowser
 from typing import Any, Dict, Optional
 
-from reachy_mini_conversation_app.book_library import BookLibrary
 from reachy_mini_conversation_app.story_store import Story, StoryPage, StoryStore
+from reachy_mini_conversation_app.book_library import BookLibrary
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
+
 
 logger = logging.getLogger(__name__)
 
@@ -38,10 +38,12 @@ class StoryBookOpen(Tool):
     }
 
     def is_available(self) -> bool:
+        """Return True only when a Gemini API key is configured."""
         key = getattr(__import__("reachy_mini_conversation_app.config", fromlist=["config"]).config, "GEMINI_API_KEY", None)
         return bool(key and str(key).strip())
 
     async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
+        """List saved books, or load one by id and open the reader."""
         library = BookLibrary.get()
         book_id: Optional[str] = kwargs.get("book_id")
 

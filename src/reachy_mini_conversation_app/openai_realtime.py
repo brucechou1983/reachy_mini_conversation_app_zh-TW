@@ -14,7 +14,7 @@ from openai import AsyncOpenAI
 from fastrtc import AdditionalOutputs, AsyncStreamHandler, wait_for_item, audio_to_int16
 from numpy.typing import NDArray
 from scipy.signal import resample
-from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
+from websockets.exceptions import ConnectionClosedOK, ConnectionClosedError
 
 from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.prompts import get_session_voice, get_session_instructions
@@ -81,7 +81,7 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         # Story auto-advance state
         self._story_next_page: int | None = None
         self._story_is_last_page: bool = False
-        self._story_advance_task: asyncio.Task | None = None
+        self._story_advance_task: asyncio.Task[None] | None = None
         self._story_audio_start: float | None = None
         self._story_audio_samples: int = 0
 
@@ -413,10 +413,11 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
             try:
                 from reachy_mini_conversation_app.memory_consolidation import consolidate_memories
 
-                await asyncio.wait_for(
-                    consolidate_memories(self.deps.memory_store, config.GEMINI_API_KEY),
-                    timeout=30.0,
-                )
+                if self.deps.memory_store is not None:
+                    await asyncio.wait_for(
+                        consolidate_memories(self.deps.memory_store, config.GEMINI_API_KEY),
+                        timeout=30.0,
+                    )
                 if self.deps.profile_memory_store:
                     await asyncio.wait_for(
                         consolidate_memories(self.deps.profile_memory_store, config.GEMINI_API_KEY),

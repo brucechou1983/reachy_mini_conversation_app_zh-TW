@@ -176,8 +176,8 @@ class TestEnglishLearnerProfile:
 
 class TestPromptCatalogInjection:
     def test_english_learner_prompt_includes_catalog(self, monkeypatch):
-        from reachy_mini_conversation_app.config import config
         import reachy_mini_conversation_app.prompts as prompts_mod
+        from reachy_mini_conversation_app.config import config
 
         monkeypatch.setattr(config, "REACHY_MINI_CUSTOM_PROFILE", "english_learner")
         instructions = prompts_mod.get_session_instructions()
@@ -187,8 +187,8 @@ class TestPromptCatalogInjection:
             assert name in instructions
 
     def test_profile_without_skills_has_no_catalog(self, monkeypatch):
-        from reachy_mini_conversation_app.config import config
         import reachy_mini_conversation_app.prompts as prompts_mod
+        from reachy_mini_conversation_app.config import config
 
         # cosmic_kitchen has instructions.txt but no skills/ directory.
         monkeypatch.setattr(config, "REACHY_MINI_CUSTOM_PROFILE", "cosmic_kitchen")

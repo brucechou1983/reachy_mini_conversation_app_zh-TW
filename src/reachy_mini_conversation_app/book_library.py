@@ -1,15 +1,19 @@
 """Persistent book library: CSV metadata + per-book image folders on disk."""
 
 from __future__ import annotations
-
-import base64
 import csv
-import logging
+import base64
 import shutil
+import logging
 import threading
-from datetime import datetime, timezone
+from typing import TYPE_CHECKING, List, Optional
 from pathlib import Path
-from typing import List, Optional
+from datetime import datetime, timezone
+
+
+if TYPE_CHECKING:
+    from reachy_mini_conversation_app.story_store import Story
+
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +27,7 @@ class BookMeta:
     __slots__ = ("id", "title", "created_date", "last_read_date")
 
     def __init__(self, id: str, title: str, created_date: str, last_read_date: str):
+        """Store the book's id, title, and creation/last-read timestamps."""
         self.id = id
         self.title = title
         self.created_date = created_date
@@ -47,6 +52,7 @@ class BookLibrary:
     _lock: threading.Lock = threading.Lock()
 
     def __init__(self, books_dir: Path) -> None:
+        """Set up the books directory, CSV path, and lock; create the dir."""
         self._books_dir = books_dir
         self._csv_path = books_dir / _CSV_FILE
         self._rw_lock = threading.Lock()
@@ -54,6 +60,7 @@ class BookLibrary:
 
     @classmethod
     def get(cls) -> BookLibrary:
+        """Return the singleton instance, creating it on first call."""
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
@@ -69,14 +76,13 @@ class BookLibrary:
 
     @property
     def books_dir(self) -> Path:
+        """Return the root directory where books are stored."""
         return self._books_dir
 
     # --- Core operations ---
 
-    def save_book(self, story: "Story") -> None:  # noqa: F821
+    def save_book(self, story: "Story") -> None:
         """Persist all pages of a completed story to disk."""
-        from reachy_mini_conversation_app.story_store import Story  # noqa: F811
-
         _validate_book_id(story.id)
         book_dir = self._books_dir / story.id
         book_dir.mkdir(parents=True, exist_ok=True)
@@ -100,12 +106,14 @@ class BookLibrary:
         return sorted(rows, key=lambda r: r.created_date, reverse=True)
 
     def get_book(self, book_id: str) -> Optional[BookMeta]:
+        """Return metadata for the given book id, or None if not found."""
         for row in self._read_csv():
             if row.id == book_id:
                 return row
         return None
 
     def page_count(self, book_id: str) -> int:
+        """Return the number of pages stored for the given book."""
         _validate_book_id(book_id)
         d = self._books_dir / book_id
         if not d.exists():
@@ -113,10 +121,12 @@ class BookLibrary:
         return len([f for f in d.iterdir() if f.suffix == ".txt"])
 
     def book_dir(self, book_id: str) -> Path:
+        """Return the on-disk directory path for the given book."""
         _validate_book_id(book_id)
         return self._books_dir / book_id
 
     def page_image_path(self, book_id: str, page: int) -> Optional[Path]:
+        """Return the image file path for a page, or None if none exists."""
         _validate_book_id(book_id)
         d = self._books_dir / book_id
         for ext in ("png", "jpg", "jpeg"):
@@ -126,6 +136,7 @@ class BookLibrary:
         return None
 
     def page_text(self, book_id: str, page: int) -> str:
+        """Return the text of a page, or an empty string if missing."""
         _validate_book_id(book_id)
         p = self._books_dir / book_id / f"page_{page}.txt"
         if p.exists():
@@ -133,6 +144,7 @@ class BookLibrary:
         return ""
 
     def update_last_read(self, book_id: str) -> None:
+        """Update the last-read timestamp for the given book."""
         _validate_book_id(book_id)
         with self._rw_lock:
             rows = self._read_csv_unlocked()
@@ -143,6 +155,7 @@ class BookLibrary:
             self._write_csv_unlocked(rows)
 
     def delete_book(self, book_id: str) -> bool:
+        """Delete a book's metadata and files; return True if removed."""
         _validate_book_id(book_id)
         with self._rw_lock:
             rows = self._read_csv_unlocked()

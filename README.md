@@ -40,8 +40,9 @@ Reachy Mini 機器人的對話應用程式，結合 OpenAI 即時語音 API、�
 | 舞蹈與情緒動作 | 內建舞蹈庫與情緒動作播放 |
 | 視覺 / 相機 / 臉部追蹤 | 支援 gpt-realtime、SmolVLM2、YOLO、MediaPipe 等多種視覺方案 |
 | 網路搜尋 | 透過 Tavily 即時搜尋網路回答問題 |
-| 長期記憶 | 跨工作階段記住使用者偏好與事實 |
-| 多角色 Profile | 15 個內建角色，也可自訂專屬角色與工具 |
+| 長期記憶 | 以 Markdown（Zettelkasten 風格）跨工作階段記住偏好與事實，可由 Gemini 自動整理去重 |
+| 英語學習遊戲 | `english_learner` 角色以 Agent Skills（SKILL.md）提供 6 種互動英語遊戲，專為 4–6 歲設計 |
+| 多角色 Profile | 16 個內建角色，也可自訂專屬角色與工具 |
 
 ## 快速上手
 
@@ -54,7 +55,7 @@ Reachy Mini 機器人的對話應用程式，結合 OpenAI 即時語音 API、�
 | 變數 | 必填 | 說明 |
 |------|:----:|------|
 | `OPENAI_API_KEY` | **是** | OpenAI 即時語音 API 金鑰 |
-| `GEMINI_API_KEY` | 選填 | 互動說故事功能所需（[取得](https://aistudio.google.com)） |
+| `GEMINI_API_KEY` | 選填 | 互動說故事與長期記憶自動整理所需（[取得](https://aistudio.google.com)） |
 | `TAVILY_API_KEY` | 選填 | 網路搜尋功能所需（[取得](https://tavily.com)） |
 
 
@@ -157,7 +158,7 @@ pip install -e .[dev]
 |------|------|
 | `OPENAI_API_KEY` | 必填。用於存取 OpenAI 即時語音端點。
 | `MODEL_NAME` | 覆寫即時模型（預設為 `gpt-realtime`）。同時用於對話與視覺（除非使用 `--local-vision`）。
-| `GEMINI_API_KEY` | 選填。互動說故事工具（`story_book_create` 等）所需。可至 [Google AI Studio](https://aistudio.google.com) 取得。
+| `GEMINI_API_KEY` | 選填。互動說故事工具（`story_book_create` 等）與長期記憶自動整理（記憶過多時合併去重）所需。可至 [Google AI Studio](https://aistudio.google.com) 取得。
 | `TAVILY_API_KEY` | 選填。啟用 `web_search` 工具進行即時網路搜尋。可至 [tavily.com](https://tavily.com) 取得。
 | `HF_HOME` | 本機 Hugging Face 下載的快取目錄（僅搭配 `--local-vision` 使用，預設為 `./cache`）。
 | `HF_TOKEN` | Hugging Face 模型的選用 Token（僅搭配 `--local-vision` 使用，也可用 `huggingface-cli login`）。
@@ -232,6 +233,46 @@ pip install -e .[dev]
 
 內建 `storyteller` profile，具備溫暖、富想像力的角色設定，專為 4-7 歲兒童設計（指令為繁體中文）。設定 `REACHY_MINI_CUSTOM_PROFILE=storyteller` 即可使用，或在網頁介面中動態切換 profile。
 
+## 長期記憶（詳細版）
+
+機器人會把重要資訊存成人類可讀、git 友善的 Markdown 檔（Zettelkasten 風格），跨工作階段沿用。
+
+### 兩層記憶
+- **全域記憶**：所有 profile 共用的使用者層級事實與事件，存於 `~/.reachy_mini_memories/`（最多 20 筆）。
+- **角色記憶**：每個 profile 獨立、互不干擾的活動記錄，存於 `~/.reachy_mini_memories/profiles/<profile>/`（最多 10 筆）。
+
+### 儲存結構
+每筆記憶是一個帶 YAML frontmatter 的 `.md` 檔，依類型分到 `facts/`（事實／偏好）或 `events/`（事件／活動）子資料夾，檔名取自內容（支援中文）以利瀏覽。達到容量上限時自動淘汰最舊的一筆。
+
+### 自動整理（選填）
+若設定了 `GEMINI_API_KEY`，每次工作階段開始時，當事實數量超過門檻（預設 15 筆）會呼叫 Gemini（`gemini-2.5-flash`）合併重複／過時的事實並去重；事件不受影響。整理失敗為非致命，不影響正常啟動。
+
+### 相關工具
+LLM 透過 `save_memory` / `forget_memory`（全域）與 `save_profile_memory` / `forget_profile_memory`（角色）讀寫記憶；變更會即時注入系統提示。
+
+> **從舊版升級**：首次啟動會自動把舊的 `~/.reachy_mini_memories.json` 遷移成新的 Markdown 結構，原檔重新命名為 `.json.migrated`。
+
+## 英語學習與 Agent Skills
+
+`english_learner` 角色是專為 4–6 歲台灣小朋友設計的英語學習夥伴，透過遊戲化互動教英文。它採用 **Agent Skills 架構**（借鑑 Anthropic 的 SKILL.md 漸進式揭露）：系統提示只放各遊戲的名稱與簡介，完整規則在需要時才載入，藉此降低 token 用量。
+
+### 運作方式
+1. 啟動時 `skills.py` 掃描 `profiles/english_learner/skills/` 下每個含 `SKILL.md` 的資料夾，把名稱與描述彙整成「可用遊戲技能」目錄，附加到系統提示。
+2. 小朋友選遊戲後，LLM 呼叫 profile 專屬的 `activate_skill` 工具載入該 `SKILL.md` 的完整規則，並以之引導接下來的對話。
+
+### 內建 6 種遊戲
+| 遊戲 | 內容 |
+|------|------|
+| `color-detective` | 顏色偵探：用相機在房間找顏色，教英文顏色單字。 |
+| `simon-says` | 機器人老大說（Simon Says）：用肢體動作教英文動作詞與身體部位。 |
+| `teach-robot` | 教我吧小老師：角色互換，由小朋友當老師教機器人英文。 |
+| `emotion-mirror` | 情緒鏡子：用表情互相模仿，教英文情緒單字。 |
+| `photo-hunt` | 拍照大冒險：用形容詞任務找東西拍照學單字。 |
+| `story-builder` | 魔法故事書：用英文選角色與場景，一起創作故事。 |
+
+### 新增遊戲
+只需在 `profiles/english_learner/skills/<game-name>/` 新增一個含 YAML frontmatter（`name`、`description`）的 `SKILL.md`，即會自動被發現並出現在目錄中，無需改任何程式碼。詳見 [`docs/english_learner_guide.md`](docs/english_learner_guide.md)。
+
 ## 自訂 Profile
 建立自訂 profile，搭配專屬指令與工具組合！
 
@@ -241,12 +282,13 @@ pip install -e .[dev]
 
 ### 內建 Profile
 
-本應用程式內建 15 個角色 profile：
+本應用程式內建 16 個角色 profile：
 
 | Profile | 說明 |
 |---------|------|
 | `default` | 通用對話角色，具備完整工具存取權限。 |
 | `storyteller` | 溫暖、富想像力的說故事人，適合 4-7 歲兒童（繁體中文）。 |
+| `english_learner` | 英語學習遊戲老師，以 6 種 Agent Skills 遊戲教 4–6 歲小朋友英文（繁體中文引導）。 |
 | `cosmic_kitchen` | 太空主題料理角色。 |
 | `mars_rover` | 火星探索導覽員。 |
 | `sorry_bro` | 愛道歉的角色。 |

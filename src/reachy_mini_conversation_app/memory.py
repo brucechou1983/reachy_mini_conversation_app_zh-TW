@@ -19,16 +19,16 @@ Architecture — two independent memory layers:
   never share memory with each other.
 """
 
-import json
-import logging
-import os
 import re
-import threading
+import json
 import uuid
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
+import logging
+import threading
+from typing import List, Literal, Optional, cast
 from pathlib import Path
-from typing import List, Literal, Optional
+from datetime import datetime, timezone
+from dataclasses import field, dataclass
+
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +114,7 @@ def _markdown_to_entry(text: str) -> Optional[MemoryEntry]:
     frontmatter = parts[1].strip()
     body = parts[2].strip()
 
-    meta: dict = {}
+    meta: dict[str, str] = {}
     for line in frontmatter.splitlines():
         if ":" not in line:
             continue
@@ -136,7 +136,7 @@ def _markdown_to_entry(text: str) -> Optional[MemoryEntry]:
 
     return MemoryEntry(
         id=entry_id,
-        type=entry_type,  # type: ignore[arg-type]
+        type=cast(Literal["fact", "event"], entry_type),
         content=body,
         created=meta.get("created", ""),
         updated=meta.get("updated", ""),
@@ -166,6 +166,7 @@ class MarkdownMemoryStore:
         header: str = "## 長期記憶",
         legacy_json_path: Optional[Path] = None,
     ) -> None:
+        """Set up facts/events directories, limits, lock, and create dirs."""
         self._facts_dir = facts_dir
         self._events_dir = events_dir
         self._max = max_memories
@@ -235,7 +236,7 @@ class MarkdownMemoryStore:
     # Public API
     # ------------------------------------------------------------------
 
-    def add(self, content: str, memory_type: Literal["fact", "event"] = "fact") -> dict:
+    def add(self, content: str, memory_type: Literal["fact", "event"] = "fact") -> dict[str, str]:
         """Add a new memory.  Evicts the oldest entry if at capacity.
 
         Returns a dict with ``id`` and ``content`` keys for backward
@@ -268,7 +269,7 @@ class MarkdownMemoryStore:
         with self._lock:
             return self._delete_by_id(memory_id)
 
-    def list_all(self) -> list:
+    def list_all(self) -> list[dict[str, str]]:
         """Return all stored memories (oldest first) as dicts for backward compat."""
         with self._lock:
             entries = self._read_all_unlocked()

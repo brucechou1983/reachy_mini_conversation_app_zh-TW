@@ -5,6 +5,7 @@ from typing import Any, Dict
 
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -35,11 +36,13 @@ class SaveProfileMemory(Tool):
     }
 
     def is_available(self) -> bool:
+        """Return True only when a custom profile is active."""
         from reachy_mini_conversation_app.config import config
 
         return bool(config.REACHY_MINI_CUSTOM_PROFILE)
 
     async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
+        """Save the given activity summary to per-profile memory."""
         content = kwargs.get("content", "").strip()
         memory_type = kwargs.get("memory_type", "fact")
 

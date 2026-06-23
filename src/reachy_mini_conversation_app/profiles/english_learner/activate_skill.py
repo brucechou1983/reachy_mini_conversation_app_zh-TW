@@ -3,14 +3,17 @@
 import logging
 from typing import Any, Dict
 
-from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
-from reachy_mini_conversation_app.skills import scan_skills
 from reachy_mini_conversation_app.config import config
+from reachy_mini_conversation_app.skills import scan_skills
+from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
+
 
 logger = logging.getLogger(__name__)
 
 
 class ActivateSkill(Tool):
+    """Activate an Agent Skill and return its full SKILL.md instructions."""
+
     name = "activate_skill"
     description = (
         "Start a game/skill by name. "
@@ -29,6 +32,7 @@ class ActivateSkill(Tool):
     }
 
     async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
+        """Load and return the named skill's instructions, or an error."""
         skill_name = (kwargs.get("skill_name") or "").strip()
         if not skill_name:
             return {"error": "skill_name is required"}

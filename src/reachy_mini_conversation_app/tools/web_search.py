@@ -40,10 +40,12 @@ class WebSearch(Tool):
     }
 
     def is_available(self) -> bool:
+        """Return True only when a Tavily API key is configured."""
         key = getattr(config, "TAVILY_API_KEY", None)
         return bool(key and str(key).strip())
 
     async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
+        """Run a Tavily web search and return the top results."""
         query = kwargs.get("query", "")
         if not query:
             return {"error": "query is required"}

@@ -1,19 +1,20 @@
 """FastAPI routes for the story bookshelf and reader."""
 
 from __future__ import annotations
-
-import asyncio
 import io
 import json
+import asyncio
 import logging
 import zipfile
+from typing import Any, AsyncIterator
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, StreamingResponse, JSONResponse, Response
+from fastapi.responses import Response, FileResponse, JSONResponse, StreamingResponse
 
-from .book_library import BookLibrary, _validate_book_id
 from .story_store import StoryStore
+from .book_library import BookLibrary, _validate_book_id
+
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +23,6 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 def mount_story_routes(app: FastAPI) -> None:
     """Register story bookshelf and reader routes."""
-
     # ------------------------------------------------------------------ #
     # Bookshelf (landing page at /reader)
     # ------------------------------------------------------------------ #
@@ -168,7 +168,7 @@ def mount_story_routes(app: FastAPI) -> None:
         store = StoryStore.get()
         q = store.subscribe()
 
-        async def event_stream():  # type: ignore[return]
+        async def event_stream() -> AsyncIterator[str]:
             try:
                 # Send current state on connect
                 story = store.story
@@ -195,7 +195,7 @@ def mount_story_routes(app: FastAPI) -> None:
         return StreamingResponse(event_stream(), media_type="text/event-stream")
 
     @app.get("/reader/story", response_model=None)
-    def _reader_story() -> dict | JSONResponse:
+    def _reader_story() -> dict[str, Any] | JSONResponse:
         store = StoryStore.get()
         story = store.story
         if not story:

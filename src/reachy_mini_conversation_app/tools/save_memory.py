@@ -5,6 +5,7 @@ from typing import Any, Dict
 
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -35,9 +36,11 @@ class SaveMemory(Tool):
     }
 
     def is_available(self) -> bool:
+        """Return True; this tool is always enabled."""
         return True
 
     async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
+        """Save the given content to long-term memory."""
         content = kwargs.get("content", "").strip()
         memory_type = kwargs.get("memory_type", "fact")
 

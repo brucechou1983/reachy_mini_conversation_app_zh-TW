@@ -12,6 +12,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+
 # Ensure src is on path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -28,9 +29,9 @@ for mod_name in (
     if mod_name not in sys.modules:
         sys.modules[mod_name] = MagicMock()
 
-from reachy_mini_conversation_app.story_store import StoryStore, Story, StoryPage
-from reachy_mini_conversation_app.tools.story_book_go_to_page import StoryBookGoToPage
+from reachy_mini_conversation_app.story_store import Story, StoryPage, StoryStore
 from reachy_mini_conversation_app.tools.story_book_close import StoryBookClose
+from reachy_mini_conversation_app.tools.story_book_go_to_page import StoryBookGoToPage
 
 
 # ---------------------------------------------------------------------------
@@ -55,6 +56,7 @@ async def simulate_story_session(num_pages, behavior="normal", use_load=False):
     -------
     tuple
         (pages_visited, story_status, results)
+
     """
     store = StoryStore.get()
     pages = [StoryPage(text=f"第{i}頁的內容") for i in range(num_pages)]

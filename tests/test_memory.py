@@ -7,13 +7,12 @@ from pathlib import Path
 import pytest
 
 from reachy_mini_conversation_app.memory import (
-    DEFAULT_MAX_MEMORIES,
-    MarkdownMemoryStore,
     MemoryEntry,
     MemoryStore,
+    MarkdownMemoryStore,
+    _slugify,
     _entry_to_markdown,
     _markdown_to_entry,
-    _slugify,
 )
 
 

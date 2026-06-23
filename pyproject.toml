@@ -115,6 +115,11 @@ ignore = [
   "D213",  # summary on second line (conflicts with D212)
 ]
 
+[tool.ruff.lint.per-file-ignores]
+# Tests don't need docstrings, and several stub sys.modules before importing
+# the modules under test (legitimate E402).
+"tests/**" = ["D", "E402"]
+
 [tool.ruff.lint.isort]
 length-sort = true
 lines-after-imports = 2
@@ -132,6 +137,10 @@ line-ending = "auto"
 [tool.mypy]
 python_version = "3.12"
 files = ["src/"]
+# Only the library source is type-checked. ``exclude`` keeps tests and build
+# artifacts out even when mypy is invoked with an explicit path (e.g. CI runs
+# ``mypy .``), which would otherwise override ``files``.
+exclude = '^(tests/|build/)'
 ignore_missing_imports = true
 strict = true
 show_error_codes = true
