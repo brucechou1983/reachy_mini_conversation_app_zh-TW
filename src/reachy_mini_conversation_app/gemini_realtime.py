@@ -63,6 +63,7 @@ class GeminiRealtimeHandler(ConversationHandler):
         self.last_activity_time = asyncio.get_event_loop().time()
         self.start_time = asyncio.get_event_loop().time()
         self.is_idle_tool_call = False
+        self._shutdown_requested = False
 
         self.input_transcription_buffer = ""
         self.output_transcription_buffer = ""
@@ -115,18 +116,29 @@ class GeminiRealtimeHandler(ConversationHandler):
             "output_audio_transcription": {},
         }
 
-        try:
-            async with self.client.aio.live.connect(
-                model=config.GEMINI_LIVE_MODEL_NAME,
-                config=config_dict,
-            ) as session:
-                self.session = session
-                logger.info("Gemini Live session established")
-                await self._run_session_loop()
-        except Exception:
-            logger.exception("Gemini Live session failed")
-        finally:
-            self.session = None
+        # Reconnect loop: Gemini Live sessions drop (1011 internal errors, idle
+        # timeouts, network) — re-establish with backoff instead of going deaf.
+        backoff = 1.0
+        while not self._shutdown_requested:
+            try:
+                async with self.client.aio.live.connect(
+                    model=config.GEMINI_LIVE_MODEL_NAME,
+                    config=config_dict,
+                ) as session:
+                    self.session = session
+                    logger.info("Gemini Live session established")
+                    backoff = 1.0
+                    await self._run_session_loop()
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.warning("Gemini Live session ended (%s); reconnecting in %.1fs", e, backoff)
+            finally:
+                self.session = None
+            if self._shutdown_requested:
+                break
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, 10.0)
 
     async def _run_session_loop(self) -> None:
         """Process Gemini messages for the lifetime of the session."""
@@ -253,19 +265,21 @@ class GeminiRealtimeHandler(ConversationHandler):
             self.output_transcription_buffer = ""
 
     async def receive(self, frame: Tuple[int, NDArray[np.int16]]) -> None:
-        """Forward a microphone frame to Gemini as 16 kHz PCM."""
+        """Forward a microphone frame to Gemini as raw 16 kHz PCM bytes."""
         if not self.session:
             return
         _, array = frame
         audio_bytes = array.squeeze().tobytes()
-        b64_audio = base64.b64encode(audio_bytes).decode("utf-8")
         try:
+            # ``data`` must be RAW PCM bytes — the SDK base64-encodes it for the
+            # wire. Passing a pre-base64'd string double-encodes it and the Live
+            # server rejects the session with a 1011 internal error.
             await self.session.send_realtime_input(
-                audio={"mime_type": "audio/pcm;rate=16000", "data": b64_audio}
+                audio={"mime_type": "audio/pcm;rate=16000", "data": audio_bytes}
             )
         except Exception as e:
+            # Don't let a single bad/blocked frame tear down the whole app.
             logger.error("Failed to send audio to Gemini: %s", e)
-            raise
 
     async def emit(self) -> Tuple[int, NDArray[np.int16]] | AdditionalOutputs | None:
         """Emit queued speaker audio / transcript updates; trigger idle behavior."""
@@ -297,7 +311,8 @@ class GeminiRealtimeHandler(ConversationHandler):
         return f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | +{elapsed:.1f}s]"
 
     async def shutdown(self) -> None:
-        """Drop the session reference and flush buffers (session auto-closes)."""
+        """Stop the reconnect loop, drop the session and flush buffers."""
+        self._shutdown_requested = True
         self.session = None
         self.input_transcription_buffer = ""
         self.output_transcription_buffer = ""
