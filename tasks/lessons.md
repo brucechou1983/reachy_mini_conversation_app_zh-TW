@@ -200,6 +200,33 @@ Patterns captured after user corrections, so the same mistake isn't repeated.
   rhythm, and page-turn hooks. Generate the cast + all pages in one structured-JSON
   call so text and characters stay coherent.
 
+## Separating two modes that share one assistant
+
+- **When two activities share one persona/handler/library, separate them at every
+  layer AND make "current activity" an explicit, code-enforced singleton.** The
+  storybook (robot narrates) and read-along (child reads) activities had leaked into
+  each other on four layers: shared ``BookLibrary`` (read-along ``sel-*`` books showed
+  on the storybook shelf), both stores binding the same realtime handler with no
+  arbiter (stale tap → wrong-activity injection), one profile exposing both toolsets,
+  and frontend back-links crossing shelves. The robust fix was layered: (1) tag each
+  persisted item with a ``kind`` and filter every listing/get/delete by it (logical
+  namespace; keep shared *asset* routes like images open); (2) a single
+  ``ActivityState`` singleton with ``current`` — entry tools switch (and tear down the
+  other), within tools are refused when their activity isn't current, enforced in the
+  one ``dispatch_tool_call`` chokepoint so it covers every backend *and* the
+  client-driven auto-read loop; (3) gate browser tap/select routes on the same
+  ``allows()``. Rule: don't rely on the prompt to keep modes apart — route every
+  mutation through one authority and gate in code.
+
+- **A sticky "current X" needs an explicit end-of-X clear, or the *other* mode dead-
+  locks.** First cut set ``current`` on activate but never cleared it, so after one
+  activity finished, the other shelf's tap returned 409 forever (only voice recovered
+  it). Clear the flag when the activity genuinely ends (close/finish), so
+  ``current`` returns to None and either mode is selectable again. Mirror the existing
+  success-guard on sibling paths: an auto-close that narrates a wrap-up must check the
+  close actually succeeded (gate-refused calls return ``{"error":...}``), or the robot
+  says "the story's over" in the middle of the other activity.
+
 ## LLM-driven interactions
 
 - **Enforce hard rules in code, not in the prompt.** First cut of the read-along

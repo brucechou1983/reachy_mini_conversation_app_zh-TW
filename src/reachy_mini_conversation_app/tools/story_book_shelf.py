@@ -16,7 +16,7 @@ import webbrowser
 from typing import Any, Dict
 
 from reachy_mini_conversation_app.story_store import StoryStore
-from reachy_mini_conversation_app.book_library import BookLibrary
+from reachy_mini_conversation_app.book_library import KIND_STORY, BookLibrary
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
 
 
@@ -56,7 +56,7 @@ class StoryBookShelf(Tool):
         StoryStore.get().bind_handler(getattr(deps, "realtime_handler", None), loop)
 
         library = BookLibrary.get()
-        books = library.list_books()
+        books = library.list_books(kind=KIND_STORY)
 
         opened = False
         try:

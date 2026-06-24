@@ -16,7 +16,7 @@ from typing import Any
 
 from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.story_store import Story, StoryPage
-from reachy_mini_conversation_app.book_library import BookLibrary
+from reachy_mini_conversation_app.book_library import KIND_READ_ALONG, BookLibrary
 from reachy_mini_conversation_app.read_along_books import ReadAlongBook
 
 
@@ -37,7 +37,7 @@ def import_book_text(book: ReadAlongBook) -> bool:
         pages=[StoryPage(text=p.text) for p in book.pages],
         status="ready",
     )
-    library.save_book(story)
+    library.save_book(story, kind=KIND_READ_ALONG)
     logger.info("Imported curated read-along book '%s' (text only)", book.id)
     return True
 

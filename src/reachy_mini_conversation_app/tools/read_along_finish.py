@@ -56,6 +56,9 @@ class ReadAlongFinish(Tool):
         book_id = store.session.book_id
         result = store.finish(stars)
         assert result is not None
+        # Read-along ended → clear the activity so the story shelf becomes tappable again.
+        from reachy_mini_conversation_app.activity_state import READ_ALONG, ActivityState
+        ActivityState.get().deactivate(READ_ALONG)
         # Persist completion so the bookshelf shows a green check next time.
         try:
             ReadAlongProgress.get().mark_completed(book_id, result["stars"])

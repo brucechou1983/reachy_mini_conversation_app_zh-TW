@@ -245,6 +245,15 @@ async def dispatch_tool_call(tool_name: str, args_json: str, deps: ToolDependenc
     if not tool:
         return {"error": f"unknown tool: {tool_name}"}
 
+    # Enforce the current-activity separation (storybook vs read-along): entry tools
+    # switch activity (closing the other); within tools are refused when their
+    # activity isn't current. Activity-agnostic tools pass through.
+    from reachy_mini_conversation_app.activity_state import gate_tool_call
+
+    gate_error = gate_tool_call(tool_name)
+    if gate_error is not None:
+        return gate_error
+
     args = _safe_load_obj(args_json)
     try:
         return await tool(deps, **args)

@@ -14,7 +14,8 @@ from pydantic import BaseModel
 from fastapi.responses import Response, FileResponse, JSONResponse, StreamingResponse
 
 from .story_store import StoryStore
-from .book_library import BookLibrary, _validate_book_id
+from .book_library import KIND_STORY, BookLibrary, _validate_book_id
+from .activity_state import STORY, READ_ALONG, ActivityState
 from .read_along_store import STATE_SOUND_OUT, ReadAlongStore
 
 
@@ -48,7 +49,7 @@ def mount_story_routes(app: FastAPI) -> None:
     @app.get("/reader/api/books")
     def _list_books() -> JSONResponse:
         library = BookLibrary.get()
-        books = library.list_books()
+        books = library.list_books(kind=KIND_STORY)
         result = []
         for meta in books:
             count = library.page_count(meta.id)
@@ -71,20 +72,23 @@ def mount_story_routes(app: FastAPI) -> None:
 
     @app.post("/reader/api/books/{book_id}/select")
     def _select_book(book_id: str) -> JSONResponse:
-        # A child tapped a cover on the shelf: nudge the robot to open & read it.
+        # A child tapped a cover on the storybook shelf: nudge the robot to open &
+        # read it. Refused while the read-along activity is current (don't cross over).
         _check_book_id(book_id)
+        if not ActivityState.get().allows(STORY):
+            raise HTTPException(status_code=409, detail="not the story activity")
         library = BookLibrary.get()
-        meta = library.get_book(book_id)
+        meta = library.get_book(book_id, kind=KIND_STORY)
         if meta is None:
             raise HTTPException(status_code=404, detail="book not found")
-        _inject_story_select(StoryStore.get(), book_id, meta.title)
+        _inject_story_select(book_id, meta.title)
         return JSONResponse({"ok": True, "book_id": book_id, "reader_url": f"/reader/books/{book_id}"})
 
     @app.delete("/reader/api/books/{book_id}")
     def _delete_book(book_id: str) -> JSONResponse:
         _check_book_id(book_id)
         library = BookLibrary.get()
-        if not library.delete_book(book_id):
+        if not library.delete_book(book_id, kind=KIND_STORY):
             raise HTTPException(status_code=404, detail="book not found")
         return JSONResponse({"ok": True})
 
@@ -92,7 +96,7 @@ def mount_story_routes(app: FastAPI) -> None:
     def _download_book(book_id: str) -> StreamingResponse:
         _check_book_id(book_id)
         library = BookLibrary.get()
-        meta = library.get_book(book_id)
+        meta = library.get_book(book_id, kind=KIND_STORY)
         if meta is None:
             raise HTTPException(status_code=404, detail="book not found")
         book_dir = library.book_dir(book_id)
@@ -129,7 +133,7 @@ def mount_story_routes(app: FastAPI) -> None:
     def _get_book_meta(book_id: str) -> JSONResponse:
         _check_book_id(book_id)
         library = BookLibrary.get()
-        meta = library.get_book(book_id)
+        meta = library.get_book(book_id, kind=KIND_STORY)
         if meta is None:
             raise HTTPException(status_code=404, detail="book not found")
         return JSONResponse({
@@ -144,7 +148,10 @@ def mount_story_routes(app: FastAPI) -> None:
     def _get_page(book_id: str, page: int) -> JSONResponse:
         _check_book_id(book_id)
         library = BookLibrary.get()
-        if library.get_book(book_id) is None:
+        # Story-reader data route → story books only (the read-along reader uses its
+        # own /reader/read-along/state). The page IMAGE route below stays unguarded
+        # because read-along covers/illustrations are served through it.
+        if library.get_book(book_id, kind=KIND_STORY) is None:
             raise HTTPException(status_code=404, detail="book not found")
         total = library.page_count(book_id)
         if page < 0 or page >= total:
@@ -264,6 +271,8 @@ def mount_story_routes(app: FastAPI) -> None:
 
     @app.post("/reader/read-along/tap")
     async def _read_along_tap(payload: TapPayload) -> JSONResponse:
+        if not ActivityState.get().allows(READ_ALONG):
+            return JSONResponse({"error": "not_read_along_activity"}, status_code=409)
         store = ReadAlongStore.get()
         session = store.session
         if session is None:
@@ -306,6 +315,8 @@ def mount_story_routes(app: FastAPI) -> None:
     async def _read_along_select(payload: SelectPayload) -> JSONResponse:
         from .read_along_books import get_book
 
+        if not ActivityState.get().allows(READ_ALONG):
+            return JSONResponse({"error": "not_read_along_activity"}, status_code=409)
         book = get_book(payload.book_id)
         if book is None:
             return JSONResponse({"error": "unknown_book"}, status_code=404)
@@ -371,8 +382,9 @@ def _inject_to_handler(store: ReadAlongStore, text: str) -> None:
     _schedule_injection(store.handler, store.loop, text, "read-along")
 
 
-def _inject_story_select(store: StoryStore, book_id: str, title: str) -> None:
+def _inject_story_select(book_id: str, title: str) -> None:
     """Best-effort: tell the robot the child tapped a story book on the shelf."""
+    store = StoryStore.get()
     _schedule_injection(
         store.handler,
         store.loop,

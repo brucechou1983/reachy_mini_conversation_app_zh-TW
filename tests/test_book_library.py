@@ -88,3 +88,68 @@ class TestRoundTrip:
     def test_unsafe_id_blocks_disk_access(self, lib: BookLibrary):
         with pytest.raises(ValueError):
             lib.page_count("../escape")
+
+
+# ------------------------------------------------------------------
+# kind separation (storybook vs read-along share one library)
+# ------------------------------------------------------------------
+
+
+def _book(book_id: str, title: str) -> Story:
+    return Story(id=book_id, title=title, pages=[StoryPage(text="p")], status="ready")
+
+
+class TestKindSeparation:
+    def test_list_filters_by_kind(self, lib: BookLibrary):
+        from reachy_mini_conversation_app.book_library import KIND_STORY, KIND_READ_ALONG
+
+        lib.save_book(_book("uuid-1", "我的故事"), kind=KIND_STORY)
+        lib.save_book(_book("sel-feelings", "Big Feelings"), kind=KIND_READ_ALONG)
+
+        story_ids = [b.id for b in lib.list_books(kind=KIND_STORY)]
+        ra_ids = [b.id for b in lib.list_books(kind=KIND_READ_ALONG)]
+        assert story_ids == ["uuid-1"]
+        assert ra_ids == ["sel-feelings"]
+        assert len(lib.list_books()) == 2          # no filter → both
+
+    def test_get_book_respects_kind(self, lib: BookLibrary):
+        from reachy_mini_conversation_app.book_library import KIND_STORY, KIND_READ_ALONG
+
+        lib.save_book(_book("sel-x", "English"), kind=KIND_READ_ALONG)
+        assert lib.get_book("sel-x", kind=KIND_READ_ALONG) is not None
+        assert lib.get_book("sel-x", kind=KIND_STORY) is None   # wrong kind → not found
+        assert lib.get_book("sel-x") is not None                # no kind → found
+
+    def test_delete_respects_kind(self, lib: BookLibrary):
+        from reachy_mini_conversation_app.book_library import KIND_STORY, KIND_READ_ALONG
+
+        lib.save_book(_book("sel-x", "English"), kind=KIND_READ_ALONG)
+        # story-shelf delete must not remove a read-along book
+        assert lib.delete_book("sel-x", kind=KIND_STORY) is False
+        assert lib.get_book("sel-x") is not None
+        # correct kind deletes it
+        assert lib.delete_book("sel-x", kind=KIND_READ_ALONG) is True
+        assert lib.get_book("sel-x") is None
+
+    def test_save_is_upsert_no_duplicate_rows(self, lib: BookLibrary):
+        from reachy_mini_conversation_app.book_library import KIND_STORY
+
+        lib.save_book(_book("uuid-1", "v1"), kind=KIND_STORY)
+        lib.save_book(_book("uuid-1", "v2"), kind=KIND_STORY)   # same id again
+        books = lib.list_books()
+        assert len(books) == 1
+        assert books[0].title == "v2"                            # updated, not duplicated
+
+    def test_legacy_csv_without_kind_is_migrated(self, lib: BookLibrary):
+        from reachy_mini_conversation_app.book_library import KIND_STORY, KIND_READ_ALONG
+
+        # Simulate an old CSV with no 'kind' column (pre-migration on-device file).
+        lib._csv_path.write_text(
+            "id,title,created_date,last_read_date\n"
+            "uuid-old,舊故事,2020-01-01,2020-01-01\n"
+            "sel-big-feelings,Big Feelings,2020-01-02,2020-01-02\n",
+            encoding="utf-8",
+        )
+        # kind derived from id prefix: sel-* → read_along, else story
+        assert [b.id for b in lib.list_books(kind=KIND_STORY)] == ["uuid-old"]
+        assert [b.id for b in lib.list_books(kind=KIND_READ_ALONG)] == ["sel-big-feelings"]

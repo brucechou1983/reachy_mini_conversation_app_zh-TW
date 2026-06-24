@@ -114,6 +114,19 @@ async def test_last_page_schedules_close(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_auto_close_skips_wrapup_when_close_refused(monkeypatch):
+    """If the activity switched away, the gate refuses the close → no wrap-up narration."""
+    _mock_dispatch(monkeypatch, [{"error": "現在正在進行「英文朗讀」活動"}])
+    h = _FakeHandler()
+    h._story_is_last_page = True
+    h.note_story_audio(10)
+    monkeypatch.setattr(h, "_estimate_remaining_audio", lambda: 0.0)
+    h.story_turn_finished()
+    await h._story_advance_task
+    assert h.narrated == []   # robot does NOT say "the story is over" during read-along
+
+
+@pytest.mark.asyncio
 async def test_cancel_resets_state(monkeypatch):
     _mock_dispatch(monkeypatch, [])
     h = _FakeHandler()

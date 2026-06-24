@@ -241,7 +241,14 @@ class StoryReaderMixin:
             await self._push_story_log(result)
             self._story_next_page = None
             self._story_is_last_page = False
-            await self._story_request_narration(_STORY_CLOSE_PROMPT)
+            # Only narrate the wrap-up if the close actually happened. If the activity
+            # has switched away (e.g. to read-along) the gate refuses the close
+            # (returns an ``error``), and we must NOT say "the story is over" in the
+            # middle of the other activity.
+            if "error" not in result:
+                await self._story_request_narration(_STORY_CLOSE_PROMPT)
+            else:
+                logger.info("story: close refused (%s); skipping wrap-up", result)
         except asyncio.CancelledError:
             logger.info("Story auto-close cancelled")
 

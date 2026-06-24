@@ -17,21 +17,39 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_CSV_FIELDS = ["id", "title", "created_date", "last_read_date"]
+# A book belongs to exactly one activity. Stored per-row so the two shelves never
+# show each other's books (see activity_state / story_routes).
+KIND_STORY = "story"
+KIND_READ_ALONG = "read_along"
+
+_CSV_FIELDS = ["id", "title", "created_date", "last_read_date", "kind"]
 _CSV_FILE = "books.csv"
+
+
+def _derive_kind(book_id: str) -> str:
+    """Infer a legacy row's kind from its id (read-along ids are the ``sel-*`` set)."""
+    return KIND_READ_ALONG if book_id.startswith("sel-") else KIND_STORY
 
 
 class BookMeta:
     """Metadata for a single persisted book."""
 
-    __slots__ = ("id", "title", "created_date", "last_read_date")
+    __slots__ = ("id", "title", "created_date", "last_read_date", "kind")
 
-    def __init__(self, id: str, title: str, created_date: str, last_read_date: str):
-        """Store the book's id, title, and creation/last-read timestamps."""
+    def __init__(
+        self,
+        id: str,
+        title: str,
+        created_date: str,
+        last_read_date: str,
+        kind: str = KIND_STORY,
+    ):
+        """Store the book's id, title, creation/last-read timestamps and activity kind."""
         self.id = id
         self.title = title
         self.created_date = created_date
         self.last_read_date = last_read_date
+        self.kind = kind
 
 
 def _validate_book_id(book_id: str) -> str:
@@ -81,8 +99,8 @@ class BookLibrary:
 
     # --- Core operations ---
 
-    def save_book(self, story: "Story") -> None:
-        """Persist all pages of a completed story to disk."""
+    def save_book(self, story: "Story", kind: str = KIND_STORY) -> None:
+        """Persist all pages of a completed story to disk, tagged with its activity kind."""
         _validate_book_id(story.id)
         book_dir = self._books_dir / story.id
         book_dir.mkdir(parents=True, exist_ok=True)
@@ -97,18 +115,22 @@ class BookLibrary:
             text_path.write_text(page.text, encoding="utf-8")
 
         now = datetime.now(timezone.utc).isoformat()
-        self._append_csv(story.id, story.title, now, now)
-        logger.info("Book '%s' saved to %s", story.title, book_dir)
+        self._upsert_csv(story.id, story.title, now, now, kind)
+        logger.info("Book '%s' (%s) saved to %s", story.title, kind, book_dir)
 
-    def list_books(self) -> List[BookMeta]:
-        """Return all books sorted newest-first."""
+    def list_books(self, kind: Optional[str] = None) -> List[BookMeta]:
+        """Return books sorted newest-first, optionally filtered to one activity kind."""
         rows = self._read_csv()
+        if kind is not None:
+            rows = [r for r in rows if r.kind == kind]
         return sorted(rows, key=lambda r: r.created_date, reverse=True)
 
-    def get_book(self, book_id: str) -> Optional[BookMeta]:
-        """Return metadata for the given book id, or None if not found."""
+    def get_book(self, book_id: str, kind: Optional[str] = None) -> Optional[BookMeta]:
+        """Return metadata for the given book id, or None if not found / wrong kind."""
         for row in self._read_csv():
             if row.id == book_id:
+                if kind is not None and row.kind != kind:
+                    return None
                 return row
         return None
 
@@ -154,12 +176,19 @@ class BookLibrary:
                     row.last_read_date = now
             self._write_csv_unlocked(rows)
 
-    def delete_book(self, book_id: str) -> bool:
-        """Delete a book's metadata and files; return True if removed."""
+    def delete_book(self, book_id: str, kind: Optional[str] = None) -> bool:
+        """Delete a book's metadata and files; return True if removed.
+
+        When ``kind`` is given, only a book of that activity is deleted (so the
+        storybook shelf can't delete a read-along book or vice versa).
+        """
         _validate_book_id(book_id)
         with self._rw_lock:
             rows = self._read_csv_unlocked()
-            new_rows = [r for r in rows if r.id != book_id]
+            new_rows = [
+                r for r in rows
+                if not (r.id == book_id and (kind is None or r.kind == kind))
+            ]
             if len(new_rows) == len(rows):
                 return False
             self._write_csv_unlocked(new_rows)
@@ -188,6 +217,8 @@ class BookLibrary:
                         title=row["title"],
                         created_date=row.get("created_date", ""),
                         last_read_date=row.get("last_read_date", ""),
+                        # Legacy CSVs predate the kind column → derive from the id.
+                        kind=(row.get("kind") or "").strip() or _derive_kind(row["id"]),
                     )
                     for row in reader
                 ]
@@ -212,19 +243,22 @@ class BookLibrary:
                     "title": r.title,
                     "created_date": r.created_date,
                     "last_read_date": r.last_read_date,
+                    "kind": r.kind,
                 })
         tmp.replace(self._csv_path)
 
-    def _append_csv(self, id: str, title: str, created: str, last_read: str) -> None:
+    def _upsert_csv(self, id: str, title: str, created: str, last_read: str, kind: str) -> None:
+        """Insert or update a book's row, rewriting the whole CSV.
+
+        Read-modify-write (not append) so re-saving the same id can't duplicate a
+        row and a legacy header without the ``kind`` column is migrated in place.
+        """
         with self._rw_lock:
-            write_header = not self._csv_path.exists()
-            with self._csv_path.open("a", newline="", encoding="utf-8") as f:
-                writer = csv.DictWriter(f, fieldnames=_CSV_FIELDS)
-                if write_header:
-                    writer.writeheader()
-                writer.writerow({
-                    "id": id,
-                    "title": title,
-                    "created_date": created,
-                    "last_read_date": last_read,
-                })
+            rows = self._read_csv_unlocked()
+            for r in rows:
+                if r.id == id:
+                    r.title, r.last_read_date, r.kind = title, last_read, kind
+                    self._write_csv_unlocked(rows)
+                    return
+            rows.append(BookMeta(id, title, created, last_read, kind))
+            self._write_csv_unlocked(rows)
