@@ -1,5 +1,6 @@
 """Hardware-free tests for the Gemini Live handler (no live session)."""
 
+import asyncio
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -288,3 +289,53 @@ def test_live_config_uses_configured_voice():
     voice = cfg["speech_config"]["voice_config"]["prebuilt_voice_config"]["voice_name"]
     assert voice == config.GEMINI_VOICE
     assert config.GEMINI_VOICE == "Leda"
+
+
+@pytest.mark.asyncio
+async def test_local_barge_in_triggers_on_sustained_loud_speech():
+    h = GeminiRealtimeHandler(MagicMock())
+    h._local_barge_in = True
+    h._barge_level = 0.05
+    h._model_speaking = True
+    h._model_speech_start = asyncio.get_event_loop().time() - 1.0  # past grace
+    cleared = {"n": 0}
+    h._clear_queue = lambda: cleared.__setitem__("n", cleared["n"] + 1)
+
+    loud = np.full(320, 3000, dtype=np.int16)  # mean-abs/32768 ≈ 0.09 > 0.05
+    for _ in range(h._BARGE_SUSTAIN):
+        h._maybe_local_barge_in((16000, loud))
+
+    assert cleared["n"] >= 1
+    assert h._model_speaking is False
+
+
+@pytest.mark.asyncio
+async def test_local_barge_in_ignores_quiet_mic():
+    h = GeminiRealtimeHandler(MagicMock())
+    h._local_barge_in = True
+    h._barge_level = 0.05
+    h._model_speaking = True
+    h._model_speech_start = asyncio.get_event_loop().time() - 1.0
+    cleared = {"n": 0}
+    h._clear_queue = lambda: cleared.__setitem__("n", cleared["n"] + 1)
+
+    quiet = np.full(320, 100, dtype=np.int16)  # ≈ 0.003
+    for _ in range(10):
+        h._maybe_local_barge_in((16000, quiet))
+    assert cleared["n"] == 0
+
+
+@pytest.mark.asyncio
+async def test_local_barge_in_respects_grace_period():
+    h = GeminiRealtimeHandler(MagicMock())
+    h._local_barge_in = True
+    h._barge_level = 0.05
+    h._model_speaking = True
+    h._model_speech_start = asyncio.get_event_loop().time()  # just started -> in grace
+    cleared = {"n": 0}
+    h._clear_queue = lambda: cleared.__setitem__("n", cleared["n"] + 1)
+
+    loud = np.full(320, 3000, dtype=np.int16)
+    for _ in range(5):
+        h._maybe_local_barge_in((16000, loud))
+    assert cleared["n"] == 0

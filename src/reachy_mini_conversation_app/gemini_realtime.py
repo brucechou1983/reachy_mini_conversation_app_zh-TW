@@ -71,6 +71,14 @@ class GeminiRealtimeHandler(ConversationHandler):
         # True while the model is producing speech, used for client-side barge-in.
         self._model_speaking = False
         self._logged_mic_while_speaking = False
+        # Local (mic-energy) barge-in — independent of Gemini's own VAD.
+        self._local_barge_in = config.BARGE_IN_LOCAL
+        try:
+            self._barge_level = float(config.BARGE_IN_LEVEL)
+        except (TypeError, ValueError):
+            self._barge_level = 0.06
+        self._loud_frames = 0
+        self._model_speech_start = 0.0
 
     def copy(self) -> "GeminiRealtimeHandler":
         """Create a fresh handler instance for a new session."""
@@ -278,7 +286,11 @@ class GeminiRealtimeHandler(ConversationHandler):
                         audio_array = np.frombuffer(audio_bytes, dtype=np.int16).reshape(1, -1)
                         if self.deps.head_wobbler is not None:
                             self.deps.head_wobbler.feed(base64.b64encode(audio_bytes).decode())
-                        self.last_activity_time = asyncio.get_event_loop().time()
+                        now = asyncio.get_event_loop().time()
+                        self.last_activity_time = now
+                        if not self._model_speaking:
+                            self._model_speech_start = now
+                            self._loud_frames = 0
                         self._model_speaking = True
                         await self.output_queue.put((self.output_sample_rate, audio_array))
 
@@ -303,10 +315,34 @@ class GeminiRealtimeHandler(ConversationHandler):
             self.input_transcription_buffer = ""
             self.output_transcription_buffer = ""
 
+    # Local barge-in tuning.
+    _BARGE_GRACE_S = 0.4   # ignore the first moments of the robot's turn
+    _BARGE_SUSTAIN = 3     # consecutive loud mic frames required
+
+    @staticmethod
+    def _frame_level(audio_frame: NDArray[Any]) -> float:
+        """Return the mic frame's mean-abs loudness, normalized to ~0..1."""
+        a = np.abs(np.asarray(audio_frame, dtype=np.float32).ravel())
+        if a.size == 0:
+            return 0.0
+        m = float(a.mean())
+        return m / 32768.0 if m > 1.5 else m  # handle int16-range input
+
+    def _maybe_local_barge_in(self, frame: Tuple[int, NDArray[np.int16]]) -> None:
+        """Stop playback when sustained speech is heard over the robot's voice."""
+        if asyncio.get_event_loop().time() - self._model_speech_start < self._BARGE_GRACE_S:
+            return
+        level = self._frame_level(frame[1])
+        self._loud_frames = self._loud_frames + 1 if level >= self._barge_level else 0
+        if self._loud_frames >= self._BARGE_SUSTAIN:
+            logger.info("Local barge-in: sustained speech (level=%.3f) — stopping playback", level)
+            self._barge_in()
+
     def _barge_in(self) -> None:
         """Stop the robot talking immediately: drop queued audio + flush player."""
         self._model_speaking = False
         self._logged_mic_while_speaking = False
+        self._loud_frames = 0
         # Drop audio we've already queued, then flush the player buffer so the
         # robot goes quiet at once instead of finishing its turn.
         self._drain_output_queue()
@@ -362,6 +398,9 @@ class GeminiRealtimeHandler(ConversationHandler):
         if self._model_speaking and not self._logged_mic_while_speaking:
             logger.info("Mic frames reaching Gemini while robot speaks (barge-in input path OK)")
             self._logged_mic_while_speaking = True
+        # Local barge-in: stop playback if we hear sustained speech over the robot.
+        if self._local_barge_in and self._model_speaking:
+            self._maybe_local_barge_in(frame)
         audio_bytes = self._to_gemini_pcm(frame)
         try:
             # ``data`` must be RAW PCM bytes — the SDK base64-encodes it for the

@@ -87,11 +87,18 @@ class TimeStretcher:
         return best_k
 
     def process(self, x: NDArray[np.float32]) -> NDArray[np.float32]:
-        """Stretch a chunk; returns the finalized output samples so far."""
+        """Stretch a chunk; returns the finalized output samples so far.
+
+        Accepts mono audio shaped (N,) or (N, 1) — the Gemini backend emits the
+        latter, which used to crash concatenation. Output keeps the input shape.
+        """
+        arr = np.asarray(x, dtype=np.float32)
         if self.factor <= 1.0:
-            return np.asarray(x, dtype=np.float32)
-        if x.size:
-            self._buf = np.concatenate([self._buf, np.asarray(x, dtype=np.float32)])
+            return arr
+        was_2d = arr.ndim == 2
+        arr = arr.ravel()
+        if arr.size:
+            self._buf = np.concatenate([self._buf, arr])
 
         out_pieces = []
         # Need room for the search window, the frame, and the template lookahead.
@@ -114,5 +121,6 @@ class TimeStretcher:
                 self._read -= drop
 
         if not out_pieces:
-            return np.zeros(0, dtype=np.float32)
-        return np.clip(np.concatenate(out_pieces), -1.0, 1.0)
+            return np.zeros((0, 1), dtype=np.float32) if was_2d else np.zeros(0, dtype=np.float32)
+        out = np.clip(np.concatenate(out_pieces), -1.0, 1.0)
+        return out.reshape(-1, 1) if was_2d else out

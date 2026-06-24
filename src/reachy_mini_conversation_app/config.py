@@ -47,6 +47,14 @@ class Config:
     # Gemini Live prebuilt voice (e.g. Leda, Puck, Kore, Aoede, Charon, Fenrir, Orus, Zephyr).
     GEMINI_VOICE = os.getenv("GEMINI_VOICE", "Leda")
 
+    # Client-side barge-in: stop playback locally when the mic hears sustained speech
+    # while the robot is talking — for robots whose server-side VAD won't interrupt.
+    # OFF by default (can self-interrupt if the robot lacks echo cancellation).
+    # BARGE_IN_LEVEL is the mic loudness threshold (0..1 mean-abs); raise if it
+    # self-triggers, lower if it doesn't catch you.
+    BARGE_IN_LOCAL = os.getenv("BARGE_IN_LOCAL", "").strip().lower() in ("1", "true", "yes")
+    BARGE_IN_LEVEL = os.getenv("BARGE_IN_LEVEL", "0.06")
+
     # Route every Gemini call (Live conversation, storyteller, memory consolidation)
     # through Vertex AI instead of AI Studio. Vertex uses ADC (gcloud auth
     # application-default login) + project/location instead of an API key.

@@ -94,6 +94,7 @@ launchctl setenv GEMINI_API_KEY <你的_AI_STUDIO_KEY>
 launchctl setenv GEMINI_LIVE_MODEL_NAME gemini-3.1-flash-live-preview
 launchctl setenv REACHY_MINI_CUSTOM_PROFILE english_learner   # 選填：啟用英文學習遊戲
 launchctl setenv GEMINI_VOICE Leda                            # 選填：Gemini 語音（Leda/Kore/Aoede/Charon…）
+launchctl setenv BARGE_IN_LOCAL 1                             # 選填：講話時可被打斷（server VAD 不靈時用；會自己打斷自己就拿掉）
 # 語速放慢預設關閉；要嘗試：launchctl setenv SPEECH_SLOWDOWN 1.4（調查中，部分後端可能無效）
 # 切回 Vertex 時改用：launchctl setenv GOOGLE_GENAI_USE_VERTEXAI true（並設好 GOOGLE_CLOUD_PROJECT）
 ```
@@ -206,6 +207,8 @@ pip install -e .[dev]
 | `GEMINI_API_KEY` | 選填。互動說故事工具（`story_book_create` 等）、長期記憶自動整理，以及 AI Studio 的 Gemini Live 後端所需。可至 [Google AI Studio](https://aistudio.google.com) 取得。
 | `GEMINI_LIVE_MODEL_NAME` | `HANDLER_TYPE=gemini` 時的 Live 模型。AI Studio Flash 3：`gemini-3.1-flash-live-preview`；Vertex 預設 `gemini-live-2.5-flash-native-audio`。
 | `GEMINI_VOICE` | Gemini Live 的語音。預設 `Leda`；可選 `Puck`、`Kore`、`Aoede`、`Charon`、`Fenrir`、`Orus`、`Zephyr` 等。|
+| `BARGE_IN_LOCAL` | 本地打斷：講話時聽到你出聲就停止播放（給 server VAD 不會打斷的機器人）。預設關；設 `1` 開啟。若會「自己打斷自己」（無回音消除）就關掉。|
+| `BARGE_IN_LEVEL` | 本地打斷的音量門檻（0~1，預設 `0.06`）。會自己誤觸發就調高，抓不到你講話就調低。|
 | `GOOGLE_GENAI_USE_VERTEXAI` | 設 `true` 走 Vertex AI（用 ADC + 專案），留空走 AI Studio（用 `GEMINI_API_KEY`）。
 | `GOOGLE_CLOUD_PROJECT` | Vertex AI 的 GCP 專案 ID（`GOOGLE_GENAI_USE_VERTEXAI=true` 時必填）。
 | `GOOGLE_CLOUD_LOCATION` | Vertex AI 區域（預設 `us-central1`；Live API 不可用 `global`）。
