@@ -159,6 +159,40 @@ async def test_page_turn_buffer_is_configurable(monkeypatch):
 async def test_failed_go_to_page_stops_loop(monkeypatch):
     _mock_dispatch(monkeypatch, [{"status": "error", "error": "no such page"}])
     h = _FakeHandler()
-    await h._story_auto_advance(99, 0.0)
+    await h._story_auto_advance(99, wait_playback=False)
     assert h.narrated == []             # nothing narrated
     assert h._story_next_page is None
+
+
+@pytest.mark.asyncio
+async def test_apply_arms_playback_event():
+    """Narrating a page arms the playback-done event so play_loop can time it."""
+    h = _FakeHandler()
+    await h.apply_story_page_result(_page(1, 2, False))
+    assert isinstance(h._story_playback_done, asyncio.Event)
+    assert not h._story_playback_done.is_set()
+
+
+@pytest.mark.asyncio
+async def test_wait_for_playback_uses_sentinel_remaining(monkeypatch):
+    """When play_loop has reported remaining playout, wait that long + buffer."""
+    from reachy_mini_conversation_app.config import config as cfg
+
+    monkeypatch.setattr(cfg, "STORY_PAGE_TURN_BUFFER_S", "0.0")
+    h = _FakeHandler()
+    h._story_playback_done = asyncio.Event()
+    h._story_playback_done.set()        # play_loop already reported
+    h._story_playback_remaining = 0.0
+    # Should not fall back to the estimate; returns ~immediately.
+    await asyncio.wait_for(h._story_wait_for_playback(), timeout=1.0)
+
+
+@pytest.mark.asyncio
+async def test_wait_for_playback_falls_back_to_estimate(monkeypatch):
+    """With no play_loop sentinel (event never armed), use the duration estimate."""
+    h = _FakeHandler()
+    h._story_playback_done = None
+    called = {"n": 0}
+    monkeypatch.setattr(h, "_estimate_remaining_audio", lambda: called.__setitem__("n", 1) or 0.0)
+    await h._story_wait_for_playback()
+    assert called["n"] == 1

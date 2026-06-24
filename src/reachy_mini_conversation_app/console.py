@@ -732,11 +732,39 @@ class LocalStream:
 
     async def play_loop(self) -> None:
         """Fetch outputs from the handler: log text and play audio frames."""
+        # Story page-turn timing: push_audio_sample() is non-blocking and feeds the
+        # speaker faster than realtime, so when narration generation ends there is
+        # still audio buffered. We measure the ACTUAL pushed audio (post time-stretch,
+        # so SPEECH_SLOWDOWN is included) and the real first-push time; when the
+        # story_audio_done sentinel arrives, the still-buffered playout time is
+        # reported back to the handler so it turns the page exactly when the speaker
+        # finishes (see StoryReaderMixin).
+        story_first_push_ts: float | None = None
+        story_pushed_duration = 0.0
+        story_tracked_event: Any = None
+
         while not self._stop_event.is_set():
             handler_output = await self.handler.emit()
 
             if isinstance(handler_output, AdditionalOutputs):
                 for msg in handler_output.args:
+                    if msg.get("role") == "story_audio_done":
+                        # All of this page's audio has been pushed: report the
+                        # still-buffered playout time and let the handler advance.
+                        ev = getattr(self.handler, "_story_playback_done", None)
+                        if ev is not None:
+                            now = asyncio.get_event_loop().time()
+                            elapsed = now - story_first_push_ts if story_first_push_ts else 0.0
+                            setattr(
+                                self.handler,
+                                "_story_playback_remaining",
+                                max(0.0, story_pushed_duration - elapsed),
+                            )
+                            ev.set()
+                        story_first_push_ts = None
+                        story_pushed_duration = 0.0
+                        story_tracked_event = None
+                        continue
                     content = msg.get("content", "")
                     if isinstance(content, str):
                         logger.info(
@@ -758,6 +786,15 @@ class LocalStream:
                     except Exception as e:  # never let slowdown break playback
                         logger.warning("speech slowdown failed; playing normally: %s", e)
                 if audio_frame is not None and audio_frame.size > 0:
+                    # Track pushed audio for story page-turn timing while a page is
+                    # being read (the handler arms a fresh event per page).
+                    ev = getattr(self.handler, "_story_playback_done", None)
+                    if ev is not None and not ev.is_set():
+                        if ev is not story_tracked_event:  # new page → reset counters
+                            story_tracked_event = ev
+                            story_first_push_ts = asyncio.get_event_loop().time()
+                            story_pushed_duration = 0.0
+                        story_pushed_duration += len(audio_frame) / output_sample_rate
                     # Push playback OFF the event loop so it can't block the
                     # recorder (see record_loop) — keeps barge-in responsive.
                     await asyncio.to_thread(self._robot.media.push_audio_sample, audio_frame)
