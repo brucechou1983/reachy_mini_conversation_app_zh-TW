@@ -148,3 +148,30 @@ async def test_inject_user_text_without_session_is_noop():
     h = GeminiRealtimeHandler(MagicMock())
     h.session = None
     await h.inject_user_text("x")  # must not raise
+
+
+@pytest.mark.asyncio
+async def test_inject_camera_image_uses_video_not_deprecated_media():
+    """Camera images must go via video=, not the deprecated media= (1007)."""
+    import io as _io
+    import base64 as _b64
+
+    import PIL.Image
+
+    h = GeminiRealtimeHandler(MagicMock())
+    sent: dict = {}
+
+    class FakeSession:
+        async def send_realtime_input(self, **kwargs):
+            sent.update(kwargs)
+
+    h.session = FakeSession()
+    buf = _io.BytesIO()
+    PIL.Image.new("RGB", (2, 2), (10, 20, 30)).save(buf, format="PNG")
+    b64 = _b64.b64encode(buf.getvalue()).decode()
+
+    await h._inject_camera_image(b64)
+
+    assert "video" in sent
+    assert "media" not in sent
+    assert isinstance(sent["video"], PIL.Image.Image)

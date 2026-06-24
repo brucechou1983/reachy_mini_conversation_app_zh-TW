@@ -203,10 +203,17 @@ class GeminiRealtimeHandler(ConversationHandler):
                 self.deps.head_wobbler.reset()
 
     async def _inject_camera_image(self, b64_image: str) -> None:
-        """Send a captured camera image into the Live session as media input."""
+        """Send a captured camera image into the Live session as a video frame.
+
+        ``send_realtime_input(media=...)`` maps to the deprecated
+        ``realtime_input.media_chunks`` field, which the Live server now rejects
+        with a 1007 error — that surfaces in the receive loop and tears down the
+        whole session (so the robot goes silent). The current API takes a still
+        image via ``video=``.
+        """
         try:
             image = PIL.Image.open(io.BytesIO(base64.b64decode(b64_image)))
-            await self.session.send_realtime_input(media=image)
+            await self.session.send_realtime_input(video=image)
         except Exception as e:
             logger.error("Failed to send camera image: %s", e)
 
