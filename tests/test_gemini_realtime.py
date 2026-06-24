@@ -408,6 +408,35 @@ async def test_local_barge_in_arms_mute_but_server_interrupt_does_not():
     assert h._mute_until == 0.0
 
 
+@pytest.mark.asyncio
+async def test_story_narration_injects_via_session():
+    """Gemini narrates a page by injecting the page text as a user turn."""
+    h = GeminiRealtimeHandler(MagicMock())
+    sent = {}
+
+    class FakeSession:
+        async def send(self, input=None, end_of_turn=None):
+            sent["input"] = input
+            sent["end_of_turn"] = end_of_turn
+
+    h.session = FakeSession()
+    await h._story_request_narration("請朗讀這一頁")
+    assert sent["input"] == "請朗讀這一頁"
+    assert sent["end_of_turn"] is True
+
+
+@pytest.mark.asyncio
+async def test_barge_in_cancels_story_autoread():
+    """A child interrupting must stop the auto-read loop."""
+    h = GeminiRealtimeHandler(MagicMock())
+    h._clear_queue = lambda: None
+    h._story_next_page = 4
+    h._story_audio_samples = 123
+    h._barge_in()
+    assert h._story_next_page is None
+    assert h._story_audio_samples == 0
+
+
 def test_live_config_uses_configured_voice():
     """Voice comes from config.GEMINI_VOICE (default Leda)."""
     from reachy_mini_conversation_app.config import config

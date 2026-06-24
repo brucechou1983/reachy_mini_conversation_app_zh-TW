@@ -2,6 +2,24 @@
 
 Patterns captured after user corrections, so the same mistake isn't repeated.
 
+## Multi-backend parity
+
+- **A feature wired to one backend's connection object silently dies on the
+  other.** Story auto-reading (announce book ready → narrate page → time the
+  audio → turn the page → close) was built entirely in the OpenAI handler and the
+  ready-notification was gated on ``getattr(handler, "connection", None)`` — an
+  OpenAI-only attribute. The Gemini handler uses ``.session``, so it generated the
+  book then never read it, and never auto-advanced. The user guessed "Gemini tool
+  calling doesn't auto-continue"; the real cause was that the whole subsystem was
+  OpenAI-only. Fix: extract a backend-agnostic ``StoryReaderMixin`` (state machine
+  + timing) with one per-backend primitive (``_story_request_narration``) and the
+  shared ``inject_user_text``; drive page-turning client-side (the app fetches each
+  page and asks the model to read it) rather than hoping the model calls the tool.
+  Rule: when two backends implement the same interface, never gate shared features
+  on a backend-specific attribute (``connection`` vs ``session``) — put the logic
+  in the shared base and depend only on the common interface; grep both handlers
+  for any feature touching ``.connection``/``.session`` directly.
+
 ## Audio / realtime backends
 
 - **When a fix has "no audible effect," read the *installed SDK source* — methods
