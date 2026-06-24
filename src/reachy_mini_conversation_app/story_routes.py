@@ -69,6 +69,17 @@ def mount_story_routes(app: FastAPI) -> None:
         except ValueError:
             raise HTTPException(status_code=400, detail="invalid book id")
 
+    @app.post("/reader/api/books/{book_id}/select")
+    def _select_book(book_id: str) -> JSONResponse:
+        # A child tapped a cover on the shelf: nudge the robot to open & read it.
+        _check_book_id(book_id)
+        library = BookLibrary.get()
+        meta = library.get_book(book_id)
+        if meta is None:
+            raise HTTPException(status_code=404, detail="book not found")
+        _inject_story_select(StoryStore.get(), book_id, meta.title)
+        return JSONResponse({"ok": True, "book_id": book_id, "reader_url": f"/reader/books/{book_id}"})
+
     @app.delete("/reader/api/books/{book_id}")
     def _delete_book(book_id: str) -> JSONResponse:
         _check_book_id(book_id)
@@ -331,18 +342,16 @@ async def read_along_event_stream(store: ReadAlongStore) -> AsyncIterator[str]:
         store.unsubscribe(q)
 
 
-def _inject_to_handler(store: ReadAlongStore, text: str) -> None:
-    """Best-effort: deliver a user-role message to the bound robot handler.
+def _schedule_injection(handler: Any, loop: Any, text: str, label: str) -> None:
+    """Best-effort: deliver a user-role message to a bound robot handler.
 
-    Schedules the coroutine on the handler's event loop (which may differ from
-    the request loop), so a browser action (tap / book selection) can reach the
+    Schedules ``inject_user_text`` on the handler's event loop (which may differ
+    from the request loop), so a browser action (tap / book pick) can reach the
     live realtime session.
     """
-    handler = store.handler
     if handler is None or not hasattr(handler, "inject_user_text"):
         return
     coro = handler.inject_user_text(text)
-    loop = store.loop
     try:
         running: asyncio.AbstractEventLoop | None = asyncio.get_running_loop()
     except RuntimeError:
@@ -353,8 +362,24 @@ def _inject_to_handler(store: ReadAlongStore, text: str) -> None:
         else:
             asyncio.ensure_future(coro)
     except Exception as e:  # pragma: no cover - defensive
-        logger.warning("read-along handler injection failed: %s", e)
+        logger.warning("%s handler injection failed: %s", label, e)
         coro.close()
+
+
+def _inject_to_handler(store: ReadAlongStore, text: str) -> None:
+    """Best-effort: deliver a user-role message to the read-along handler."""
+    _schedule_injection(store.handler, store.loop, text, "read-along")
+
+
+def _inject_story_select(store: StoryStore, book_id: str, title: str) -> None:
+    """Best-effort: tell the robot the child tapped a story book on the shelf."""
+    _schedule_injection(
+        store.handler,
+        store.loop,
+        f"[孩子在書架上選了故事書《{title}》(book_id={book_id})。"
+        f'請馬上呼叫 story_book_open(book_id="{book_id}") 開啟並開始唸給他聽。]',
+        "story-shelf",
+    )
 
 
 def _inject_tap(store: ReadAlongStore, word: str) -> None:
