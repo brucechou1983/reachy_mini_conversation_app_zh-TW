@@ -219,3 +219,50 @@ def test_bind_handler():
     sentinel = object()
     store.bind_handler(sentinel, None)
     assert store.handler is sentinel
+
+
+# --- page completion gate + grade ---
+
+
+def test_page_complete_and_remaining():
+    store = _store_with(["I feel happy"])
+    s = store.session
+    assert s.page_complete is False
+    assert s.remaining_words() == ["I", "feel", "happy"]
+    store.cue("I", STATE_SUCCESS)
+    store.cue("feel", STATE_SUCCESS)
+    assert s.remaining_words() == ["happy"]
+    assert s.page_complete is False
+    store.cue("happy", STATE_SUCCESS)
+    assert s.page_complete is True
+    assert s.remaining_words() == []
+
+
+def test_grade_marks_misses_and_successes():
+    store = _store_with(["I feel happy"])
+    res = store.grade(correct=["I", "feel"], incorrect=["happy"])
+    assert res["complete"] is False
+    assert res["remaining"] == ["happy"]
+    # the misread word got a visual cue (escalation), the others are success
+    assert store.session.word_states[2] == STATE_BOUNCE
+    assert store.session.word_states[0] == STATE_SUCCESS
+
+
+def test_grade_all_correct_completes():
+    store = _store_with(["I feel happy"])
+    res = store.grade(correct=["I", "feel", "happy"], incorrect=[])
+    assert res["complete"] is True
+    assert res["remaining"] == []
+
+
+def test_grade_no_session_returns_none():
+    ReadAlongStore._instance = None
+    assert ReadAlongStore.get().grade(["x"], []) is None
+
+
+def test_page_complete_resets_on_page_change():
+    store = _store_with(["one two", "three four"])
+    store.grade(["one", "two"], [])
+    assert store.session.page_complete is True
+    store.go_to_page(1)
+    assert store.session.page_complete is False  # fresh page, nothing read yet

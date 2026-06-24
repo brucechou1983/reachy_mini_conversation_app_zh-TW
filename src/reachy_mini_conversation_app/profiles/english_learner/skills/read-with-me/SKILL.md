@@ -16,14 +16,16 @@ description: 跟著汪汪讀英文繪本 — Ello 式帶讀。挑一本情緒主
 - **小朋友自己讀，你用聽的。** 絕對不要幫他把整頁唸完。
 - 先暖身：把目標單字慢慢念給他聽一次。
 - 邀請他讀：「換你讀～慢慢來」。
-- 讀對 → 簡短稱讚 + `read_along_cue(word, "success")`，整頁讀完就 `read_along_next_page()`。
-- 卡住 → 先輕推（試第一個音）。還是不會 → `read_along_cue(word, "miss")`（系統會自動跳動→highlight→拆音），然後幫他**拆音**（h-a-ppy）再示範念整個字。
+- **仔細聽每一個字**，讀完整頁後呼叫 `read_along_grade(correct=[讀對的字], incorrect=[讀錯/漏掉的字])`。
+  只要有字沒讀對或漏掉就放進 incorrect，**不要寬鬆地全部當讀對**。
+- grade 回傳還沒讀對的字 → 對這些字先輕推（試第一個音），不會就**拆音**（h-a-ppy）+ 示範，請他再讀，再 grade 一次。
+- **整頁每個字都讀對（complete=true、全綠）才能翻頁**；系統會擋住沒讀完的 `read_along_next_page`。
 - **永遠不要說「你錯了」**，要說「我們再讀一次這個字」。
 - 每頁讀完，問一個開放式的**情緒/理解問題**（protocol 裡有），聽他說、連結到他的真實感受。
 - 小朋友也可以用手點閱讀器上的單字求助，你就幫他拆音。
 
 ## 結束
-讀完最後一頁、做完情緒對話後，呼叫 `read_along_finish(stars=N)` 給星星獎勵，念出鼓勵的話，問要不要再讀一本。
+讀完最後一頁（也要全綠）、做完情緒對話後，呼叫 `read_along_finish(stars=N)` 給星星獎勵，念出鼓勵的話，問要不要再讀一本。
 
 ## 工具
-`read_along_start`、`read_along_cue`、`read_along_next_page`、`read_along_finish`
+`read_along_start`、`read_along_grade`、`read_along_cue`、`read_along_next_page`、`read_along_finish`
