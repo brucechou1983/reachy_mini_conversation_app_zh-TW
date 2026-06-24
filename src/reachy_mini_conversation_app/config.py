@@ -32,6 +32,11 @@ class Config:
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")  # Optional, enables story_book tools (AI Studio)
     STORY_BOOKS_DIR = os.getenv("STORY_BOOKS_DIR")  # Optional, defaults to ~/.reachy_mini/books/
 
+    # Slow the robot's speech for young children (pitch-preserving WSOLA time-stretch
+    # on output audio). 1.0 = normal; default 1.5 ≈ 1.5x slower. Clamped to [1.0, 2.5].
+    # Set SPEECH_SLOWDOWN=1.0 to disable, or 1.3 for a gentler slowdown.
+    SPEECH_SLOWDOWN = os.getenv("SPEECH_SLOWDOWN", "1.5")
+
     # Conversation backend: "openai" (default, OpenAI Realtime) or "gemini" (Gemini Live).
     HANDLER_TYPE = os.getenv("HANDLER_TYPE", "openai")
     # Gemini Live model used when HANDLER_TYPE=gemini. NOTE: Gemini 3 / 3.1 Flash Live is
