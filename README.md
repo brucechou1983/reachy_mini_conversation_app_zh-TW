@@ -96,8 +96,6 @@ launchctl setenv REACHY_MINI_CUSTOM_PROFILE english_learner   # 選填：啟用�
 launchctl setenv GEMINI_VOICE Leda                            # 選填：Gemini 語音（Leda/Kore/Aoede/Charon…）
 # 打斷預設靠 server VAD（直接講話蓋過汪汪即可）；server VAD 不靈時才開本地打斷：
 launchctl setenv BARGE_IN_LOCAL 1                             # 選填：會自己打斷自己（無回音消除）就拿掉
-# 小朋友覺得「沒反應」（汪汪一開口就被自己切掉）→ 調高；一開口就難打斷 → 調低；0 關閉
-launchctl setenv INTERRUPT_GRACE_MS 500
 # 「等一下」被切成「等」+「一下」分開回答 → 調高靜默判定時間（毫秒）
 launchctl setenv GEMINI_VAD_SILENCE_MS 900
 # 語速放慢預設關閉；要嘗試：launchctl setenv SPEECH_SLOWDOWN 1.4（調查中，部分後端可能無效）
@@ -214,7 +212,6 @@ pip install -e .[dev]
 | `GEMINI_VOICE` | Gemini Live 的語音。預設 `Leda`；可選 `Puck`、`Kore`、`Aoede`、`Charon`、`Fenrir`、`Orus`、`Zephyr` 等。|
 | `BARGE_IN_LOCAL` | 本地打斷：講話時聽到你出聲就停止播放（給 server VAD 不會打斷的機器人）。預設關；設 `1` 開啟。若會「自己打斷自己」（無回音消除）就關掉。|
 | `BARGE_IN_LEVEL` | 本地打斷的音量門檻（0~1，預設 `0.06`）。會自己誤觸發就調高，抓不到你講話就調低。|
-| `INTERRUPT_GRACE_MS` | 汪汪「剛開口」這段時間內忽略打斷訊號（毫秒，預設 `500`）。無回音消除時，機器人一開口就會聽到自己而誤觸發 server 打斷、把回答切掉 → 小朋友覺得「沒反應」。覺得一開口就難打斷可調低；設 `0` 關閉。|
 | `GEMINI_VAD_SILENCE_MS` | （Gemini Live）判定小朋友講完一句話所需的靜默時間（毫秒，預設 `900`）。小朋友講話會停頓，太短會把「等⋯一下」切成兩句各自回答；太長則回得慢。|
 | `GEMINI_VAD_PREFIX_MS` | （Gemini Live）保留說話開始前的一小段音訊（毫秒，預設 `300`），避免第一個字被切掉。|
 | `GOOGLE_GENAI_USE_VERTEXAI` | 設 `true` 走 Vertex AI（用 ADC + 專案），留空走 AI Studio（用 `GEMINI_API_KEY`）。

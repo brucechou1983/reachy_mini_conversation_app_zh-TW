@@ -79,16 +79,6 @@ class GeminiRealtimeHandler(ConversationHandler):
             self._barge_level = 0.06
         self._loud_frames = 0
         self._model_speech_start = 0.0
-        # Decaying peak of recent mic loudness while the robot speaks, used to tell
-        # a real interrupt (someone louder than the robot's echo) from the robot
-        # hearing its own voice. Reset at the start of each reply.
-        self._recent_mic_peak = 0.0
-        # Grace after a reply starts during which a (likely echo-induced) server
-        # interrupt is ignored, so the robot doesn't cut its own reply off.
-        try:
-            self._interrupt_grace_s = max(0.0, float(config.INTERRUPT_GRACE_MS) / 1000.0)
-        except (TypeError, ValueError):
-            self._interrupt_grace_s = 0.5
         # After a client-side barge-in we flush the player, but Gemini keeps
         # streaming the rest of the aborted turn until ITS own VAD sends
         # `interrupted`. Drop those in-flight chunks until this deadline so the
@@ -116,18 +106,22 @@ class GeminiRealtimeHandler(ConversationHandler):
     def _build_live_config(self, system_instruction: str, tools: Any) -> dict[str, Any]:
         """Build the Gemini Live connect config.
 
-        Crucially this enables *barge-in*: with no ``realtime_input_config`` the
-        robot would keep talking over the child. ``START_OF_ACTIVITY_INTERRUPTS``
-        + a HIGH start-of-speech sensitivity make the server stop the model the
-        moment it hears someone speak (mirroring OpenAI's
-        ``server_vad`` + ``interrupt_response``). The receive loop then flushes
-        playback on the ``interrupted`` signal.
+        Barge-in: ``START_OF_ACTIVITY_INTERRUPTS`` makes the server stop the model
+        when it hears the user — the receive loop then flushes playback on the
+        ``interrupted`` signal. This mirrors the OpenAI handler's default
+        ``server_vad`` + ``interrupt_response``.
 
-        End-of-speech is deliberately *patient* (LOW sensitivity + an explicit
-        ``silence_duration_ms``): children speak slowly with pauses between words,
-        and an eager detector ends the turn mid-phrase so the model answers a
-        fragment (e.g. hears "等" then asks what "一下" means). Start detection
-        stays HIGH so interrupting the robot is still instant.
+        We use Gemini's **default** start/end sensitivity (like OpenAI's default
+        server VAD). An earlier version forced ``START_SENSITIVITY_HIGH`` to
+        "help" barge-in fire; combined with no echo cancellation that made the
+        VAD trigger on the robot's *own* voice and cut its reply off ("no
+        response" / storyteller stalls). The real barge-in fix was flushing the
+        player properly (``clear_player``), so the aggressive sensitivity is gone.
+
+        The only tuning we keep is an explicit, env-configurable
+        ``silence_duration_ms`` (+ ``prefix_padding_ms``): children speak slowly
+        with pauses, and the default end-of-turn timing splits "等… 一下" into two
+        fragments answered separately.
         """
         from google.genai import types
 
@@ -152,8 +146,8 @@ class GeminiRealtimeHandler(ConversationHandler):
             "realtime_input_config": {
                 "automatic_activity_detection": {
                     "disabled": False,
-                    "start_of_speech_sensitivity": types.StartSensitivity.START_SENSITIVITY_HIGH,
-                    "end_of_speech_sensitivity": types.EndSensitivity.END_SENSITIVITY_LOW,
+                    # Default sensitivity (no HIGH override — it self-interrupted on
+                    # the robot's own echo). Only the silence window is tuned for kids.
                     "prefix_padding_ms": prefix_ms,
                     "silence_duration_ms": silence_ms,
                 },
@@ -332,7 +326,6 @@ class GeminiRealtimeHandler(ConversationHandler):
                         if not self._model_speaking:
                             self._model_speech_start = now
                             self._loud_frames = 0
-                            self._recent_mic_peak = 0.0  # fresh echo baseline per reply
                         self._model_speaking = True
                         await self.output_queue.put((self.output_sample_rate, audio_array))
 
@@ -353,30 +346,12 @@ class GeminiRealtimeHandler(ConversationHandler):
                 self.output_transcription_buffer = ""
 
         if getattr(server_content, "interrupted", None):
-            # Without echo cancellation the robot hears its own voice and the
-            # server fires spurious interrupts that cut the reply off — the child
-            # gets "no response", or the storyteller stops mid-page. Ignore an
-            # interrupt when it's likely the robot hearing itself:
-            #   • within the grace window right after the reply began, or
-            #   • the mic never got louder than the robot's own echo (the echo
-            #     gate): a real person speaking up crosses _barge_level, mere
-            #     echo does not. Set BARGE_IN_LEVEL=0 to disable the echo gate.
-            speaking_for = asyncio.get_event_loop().time() - self._model_speech_start
-            within_grace = self._model_speaking and speaking_for < self._interrupt_grace_s
-            echo_suspected = self._model_speaking and self._recent_mic_peak < self._barge_level
-            if within_grace or echo_suspected:
-                logger.info(
-                    "Ignoring interrupt (grace=%s echo=%s, %.2fs in, mic_peak=%.3f<%.3f)",
-                    within_grace, echo_suspected, speaking_for, self._recent_mic_peak,
-                    self._barge_level,
-                )
-            else:
-                logger.info("Barge-in (server interrupted): stopping playback")
-                # The server has stopped this turn itself, so anything it sends
-                # next is the new turn — don't suppress it (clears any mute window).
-                self._barge_in()
-                self.input_transcription_buffer = ""
-                self.output_transcription_buffer = ""
+            logger.info("Barge-in (server interrupted): stopping playback")
+            # The server has stopped this turn itself, so anything it sends next
+            # is the new turn — don't suppress it (clears any client mute window).
+            self._barge_in()
+            self.input_transcription_buffer = ""
+            self.output_transcription_buffer = ""
 
     # Local barge-in tuning.
     _BARGE_GRACE_S = 0.4   # ignore the first moments of the robot's turn
@@ -384,9 +359,6 @@ class GeminiRealtimeHandler(ConversationHandler):
     # After a client-side barge-in, mute incoming audio for this long to bridge
     # the gap until the server stops the aborted turn (sends `interrupted`).
     _BARGE_MUTE_WINDOW_S = 1.0
-    # Per-frame decay of the recent mic-loudness peak (keeps a short memory of how
-    # loud the mic just was, so a real interrupt outlives the frame that caused it).
-    _MIC_PEAK_DECAY = 0.85
 
     @staticmethod
     def _frame_level(audio_frame: NDArray[Any]) -> float:
@@ -474,17 +446,14 @@ class GeminiRealtimeHandler(ConversationHandler):
         """Forward a microphone frame to Gemini as 16 kHz s16le mono PCM."""
         if not self.session:
             return
-        # While the robot is speaking, track how loud the mic is so we can tell a
-        # real interrupt from the robot hearing its own voice (the echo gate).
         if self._model_speaking:
             if not self._logged_mic_while_speaking:
                 logger.info("Mic frames reaching Gemini while robot speaks (barge-in input path OK)")
                 self._logged_mic_while_speaking = True
-            level = self._frame_level(frame[1])
-            self._recent_mic_peak = max(level, self._recent_mic_peak * self._MIC_PEAK_DECAY)
-            # Local barge-in: stop playback if we hear sustained speech over the robot.
+            # Local barge-in (only when BARGE_IN_LOCAL): stop playback if we hear
+            # sustained speech over the robot, for robots whose server VAD won't fire.
             if self._local_barge_in:
-                self._maybe_local_barge_in(level)
+                self._maybe_local_barge_in(self._frame_level(frame[1]))
         audio_bytes = self._to_gemini_pcm(frame)
         try:
             # ``data`` must be RAW PCM bytes — the SDK base64-encodes it for the
