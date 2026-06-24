@@ -277,3 +277,14 @@ async def test_model_turn_marks_speaking():
     await h._handle_server_content(sc)
 
     assert h._model_speaking is True
+
+
+def test_live_config_uses_configured_voice():
+    """Voice comes from config.GEMINI_VOICE (default Leda)."""
+    from reachy_mini_conversation_app.config import config
+
+    h = GeminiRealtimeHandler(MagicMock())
+    cfg = h._build_live_config("sys", [])
+    voice = cfg["speech_config"]["voice_config"]["prebuilt_voice_config"]["voice_name"]
+    assert voice == config.GEMINI_VOICE
+    assert config.GEMINI_VOICE == "Leda"
