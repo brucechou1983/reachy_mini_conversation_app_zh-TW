@@ -46,6 +46,8 @@ class StoryStore:
         """Initialize with no active story and an empty subscriber list."""
         self._story: Optional[Story] = None
         self._subscribers: List[asyncio.Queue[Dict[str, Any]]] = []
+        self._handler: Any = None
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
 
     @classmethod
     def get(cls) -> StoryStore:
@@ -60,6 +62,25 @@ class StoryStore:
     def story(self) -> Optional[Story]:
         """Return the currently active story, or None."""
         return self._story
+
+    # --- realtime handler bridge (for browser book-pick -> robot) ---
+
+    @property
+    def handler(self) -> Any:
+        """Return the realtime handler bound to the live session, if any."""
+        return self._handler
+
+    @property
+    def loop(self) -> Optional[asyncio.AbstractEventLoop]:
+        """Return the event loop the realtime handler runs on, if known."""
+        return self._loop
+
+    def bind_handler(
+        self, handler: Any, loop: Optional[asyncio.AbstractEventLoop] = None
+    ) -> None:
+        """Bind the active realtime handler (and its loop) for shelf-pick injection."""
+        self._handler = handler
+        self._loop = loop
 
     def create_story(self, title: str) -> Story:
         """Create a new story, set it active, and broadcast 'generating'."""

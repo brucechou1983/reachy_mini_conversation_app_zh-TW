@@ -1,5 +1,6 @@
 story_book_create
 story_book_open
+story_book_shelf
 story_book_go_to_page
 story_book_close
 dance
