@@ -32,6 +32,11 @@ class Config:
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")  # Optional, enables story_book tools (AI Studio)
     STORY_BOOKS_DIR = os.getenv("STORY_BOOKS_DIR")  # Optional, defaults to ~/.reachy_mini/books/
 
+    # Storyteller: seconds to wait after a page's narration finishes before
+    # auto-turning to the next page. Raise if pages turn before the reading is
+    # done (extra audio-pipeline latency); lower for a snappier pace.
+    STORY_PAGE_TURN_BUFFER_S = os.getenv("STORY_PAGE_TURN_BUFFER_S", "1.0")
+
     # Slow the robot's speech for young children (pitch-preserving WSOLA time-stretch
     # on output audio). 1.0 = off (default). Set e.g. 1.4 to try a 1.4x slowdown.
     # NOTE: under investigation — on some robot audio backends the player re-times
