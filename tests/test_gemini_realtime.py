@@ -426,15 +426,39 @@ async def test_story_narration_injects_via_session():
 
 
 @pytest.mark.asyncio
-async def test_barge_in_cancels_story_autoread():
-    """A child interrupting must stop the auto-read loop."""
+async def test_real_barge_in_cancels_story_but_echo_does_not():
+    """A genuine child barge-in (cancel_story=True) stops the auto-read loop, but a
+    bare server interrupt / self-echo (cancel_story=False) must NOT — otherwise the
+    robot's own narration echo cancels the pending next page and the book stalls."""
     h = GeminiRealtimeHandler(MagicMock())
     h._clear_queue = lambda: None
+
+    # self-echo interrupt: keep the loop alive
     h._story_next_page = 4
     h._story_audio_samples = 123
-    h._barge_in()
+    h._barge_in()  # default cancel_story=False
+    assert h._story_next_page == 4
+    assert h._story_audio_samples == 123
+
+    # real child barge-in: tear the loop down
+    h._barge_in(cancel_story=True)
     assert h._story_next_page is None
     assert h._story_audio_samples == 0
+
+
+@pytest.mark.asyncio
+async def test_server_interrupt_without_transcript_keeps_story(monkeypatch):
+    """The interrupted handler must not cancel auto-read when no child spoke."""
+    h = GeminiRealtimeHandler(MagicMock())
+    h._clear_queue = lambda: None
+    h._story_next_page = 2
+    h._story_audio_samples = 50
+    h.input_transcription_buffer = ""  # self-echo: no real user speech
+
+    await h._handle_server_content(_server_content(interrupted=True))
+
+    assert h._story_next_page == 2          # loop survives the echo interrupt
+    assert h._story_audio_samples == 50
 
 
 def test_live_config_uses_configured_voice():

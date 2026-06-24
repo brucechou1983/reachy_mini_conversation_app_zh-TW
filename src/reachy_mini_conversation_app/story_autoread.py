@@ -102,11 +102,17 @@ class StoryReaderMixin:
         """Accumulate narration audio so the next page is timed to its end."""
         if self._story_next_page is not None or self._story_is_last_page:
             if self._story_audio_start is None:
+                logger.info("story: narration audio started (next_page=%s)", self._story_next_page)
                 self._story_audio_start = asyncio.get_event_loop().time()
             self._story_audio_samples += int(num_samples)
 
     def story_turn_finished(self) -> None:
         """When a model turn ends, schedule the next page / close if we narrated one."""
+        pending = self._story_advance_task is not None and not self._story_advance_task.done()
+        logger.info(
+            "story: turn finished (samples=%s next_page=%s last=%s task_pending=%s)",
+            self._story_audio_samples, self._story_next_page, self._story_is_last_page, pending,
+        )
         if self._story_audio_samples <= 0:
             return
         if self._story_advance_task is not None and not self._story_advance_task.done():
@@ -130,16 +136,22 @@ class StoryReaderMixin:
         self._story_is_last_page = bool(tool_result.get("is_last_page", False))
         self._story_audio_start = None
         self._story_audio_samples = 0
+        logger.info(
+            "story: narrating page=%s (next=%s last=%s)",
+            tool_result.get("page"), self._story_next_page, self._story_is_last_page,
+        )
         await self._story_request_narration(tool_result.get("instruction", ""))
 
     async def begin_story_autoread(self, page: int = 1) -> None:
         """Kick off client-driven reading from ``page`` (book ready / manual start)."""
+        logger.info("story: begin auto-read from page=%s (%s)", page, type(self).__name__)
         self.cancel_story_advance()
         self._story_advance_task = asyncio.create_task(self._story_auto_advance(page, 0.0))
 
     async def _story_auto_advance(self, page: int, wait_seconds: float) -> None:
         """Wait for the current page's audio to finish, then narrate ``page``."""
         try:
+            logger.info("story: auto-advance start page=%s wait=%.1fs", page, wait_seconds)
             if wait_seconds:
                 logger.info("Story auto-advance: waiting %.1fs before page %s", wait_seconds, page)
                 await asyncio.sleep(wait_seconds)

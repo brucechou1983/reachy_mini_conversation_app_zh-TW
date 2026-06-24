@@ -221,6 +221,10 @@ class GeminiRealtimeHandler(StoryReaderMixin, ConversationHandler):
 
     async def _story_request_narration(self, instruction: str) -> None:
         """Make Gemini read a page aloud: inject the page text as a user turn."""
+        # We are deliberately starting narration now — don't let a lingering
+        # barge-in mute window swallow this page's audio (which would leave
+        # _story_audio_samples at 0 and stall the auto-advance).
+        self._mute_until = 0.0
         await self.inject_user_text(instruction, respond=True)
 
     async def _handle_tool_call(self, tool_call: Any) -> None:
@@ -315,11 +319,10 @@ class GeminiRealtimeHandler(StoryReaderMixin, ConversationHandler):
             # 'interrupted' decision (which can be slow or never arrive).
             if self._model_speaking and not self.input_transcription_buffer:
                 logger.info("Barge-in (heard child): stopping playback")
-                # The server is transcribing the child, so it manages this turn —
-                # flush, but don't arm the mute window (that's only for the local
-                # mic-energy path, where the server may not know yet). Muting here
-                # risks swallowing the start of the reply.
-                self._barge_in()
+                # A real child was heard (the server is transcribing them): flush
+                # and stop the story auto-read. (Don't arm the mute window here —
+                # that's only for the local mic-energy path.)
+                self._barge_in(cancel_story=True)
             self.input_transcription_buffer += transcription.text
 
         transcription = getattr(server_content, "output_transcription", None)
@@ -368,10 +371,14 @@ class GeminiRealtimeHandler(StoryReaderMixin, ConversationHandler):
                 self.output_transcription_buffer = ""
 
         if getattr(server_content, "interrupted", None):
-            logger.info("Barge-in (server interrupted): stopping playback")
-            # The server has stopped this turn itself, so anything it sends next
-            # is the new turn — don't suppress it (clears any client mute window).
-            self._barge_in()
+            # Without echo cancellation the robot self-triggers this on its own
+            # narration bleeding into the mic — especially during the multi-second
+            # wait between story pages. Always flush playback, but only tear down
+            # the auto-read loop if a REAL child spoke this turn (transcript present);
+            # a bare self-echo interrupt must NOT cancel the pending next page.
+            real_user = bool(self.input_transcription_buffer.strip())
+            logger.info("Barge-in (server interrupted): stopping playback (real_user=%s)", real_user)
+            self._barge_in(cancel_story=real_user)
             self.input_transcription_buffer = ""
             self.output_transcription_buffer = ""
 
@@ -398,10 +405,10 @@ class GeminiRealtimeHandler(StoryReaderMixin, ConversationHandler):
         self._loud_frames = self._loud_frames + 1 if level >= self._barge_level else 0
         if self._loud_frames >= self._BARGE_SUSTAIN:
             logger.info("Local barge-in: sustained speech (level=%.3f) — stopping playback", level)
-            # Gemini keeps streaming this turn until its own VAD fires; mute it.
-            self._barge_in(suppress=True)
+            # A real child speaking up: mute the rest of the turn AND stop auto-read.
+            self._barge_in(suppress=True, cancel_story=True)
 
-    def _barge_in(self, suppress: bool = False) -> None:
+    def _barge_in(self, suppress: bool = False, cancel_story: bool = False) -> None:
         """Stop the robot talking immediately: drop queued audio + flush player.
 
         ``suppress=True`` (client-side barge-in: heard-child / local mic energy)
@@ -410,11 +417,24 @@ class GeminiRealtimeHandler(StoryReaderMixin, ConversationHandler):
         ``interrupted`` — doesn't resume playback right after the flush. For a
         server ``interrupted`` (``suppress=False``) the server has already
         stopped the turn, so we clear the mute and let the next turn play.
+
+        ``cancel_story`` tears down the story auto-read loop. It must be True ONLY
+        for a *genuine* user barge-in (a real child spoke) — NOT for a bare server
+        ``interrupted``, which the robot self-triggers via mic echo of its own
+        narration during the multi-second wait between pages, and which would
+        otherwise cancel the pending next-page task and stall the book.
         """
+        story_pending = self._story_advance_task is not None and not self._story_advance_task.done()
+        logger.info(
+            "barge-in: suppress=%s cancel_story=%s story_pending=%s input_buf=%r speaking=%s",
+            suppress, cancel_story, story_pending,
+            self.input_transcription_buffer[:20], self._model_speaking,
+        )
         self._model_speaking = False
         self._logged_mic_while_speaking = False
         self._loud_frames = 0
-        self.cancel_story_advance()  # a child interrupting stops the auto-read loop
+        if cancel_story:
+            self.cancel_story_advance()  # a real child interrupting stops the auto-read
         if suppress:
             self._mute_until = asyncio.get_event_loop().time() + self._BARGE_MUTE_WINDOW_S
         else:
