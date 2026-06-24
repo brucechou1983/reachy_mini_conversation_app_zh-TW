@@ -4,6 +4,39 @@ Patterns captured after user corrections, so the same mistake isn't repeated.
 
 ## Audio / realtime backends
 
+- **When a fix has "no audible effect," read the *installed SDK source* — methods
+  go silently no-op.** Barge-in "依然沒有停" for many attempts even though detection
+  logged correctly. Root cause: `clear_audio_queue` gated on
+  `media.backend ∈ {GSTREAMER, GSTREAMER_NO_VIDEO}` to call `clear_player()`, else
+  `clear_output_buffer()`. But the SDK's `_resolve_backend` rewrites those legacy
+  enums to `LOCAL`, so the check was **always False** → we always called
+  `clear_output_buffer()`, which is a **deprecated no-op** on both `GStreamerAudio`
+  and `GstWebRTCClient` (only `clear_player()` actually flushes the appsrc; WEBRTC's
+  also POSTs the daemon to drop the speaker queue). The detection chain looked fine
+  in our code; the bug was one method call into the dependency. Rule: when behavior
+  doesn't change, grep the *installed* package (`.venv/.../site-packages`) for the
+  exact method you call and confirm it isn't deprecated/no-op/alias-resolved before
+  touching your own logic. Don't branch on SDK enums that the SDK may normalize —
+  prefer `getattr(obj, "real_method", None)` capability checks.
+
+- **A client-side barge-in must suppress the rest of the aborted turn, not just
+  flush once.** After flushing playback locally (mic energy / heard-child), Gemini
+  keeps streaming the *same* interrupted turn until its own server VAD sends
+  `interrupted`; those chunks re-enter `output_queue` and resume playback a beat
+  later (log: `Mic frames… while robot speaks` reappears right after the flush).
+  Fix: a post-barge-in mute window (`_mute_until`) that drops incoming `model_turn`
+  audio until the server `interrupted`/`turn_complete` arrives (or the window
+  lapses). A server `interrupted` means the turn already stopped → clear the mute
+  so the next turn plays. Rule: flushing the buffer is necessary but not
+  sufficient when the producer keeps streaming — gate the producer too.
+
+- **A regression test can lock in the bug.** `test_console_barge_in` asserted that
+  real backends (LOCAL/WEBRTC) call `clear_output_buffer()` and *not*
+  `clear_player()` — i.e. it pinned the no-op as correct, so it stayed green
+  through the whole broken period. When a feature "works in tests but not on
+  device," re-derive what the test *should* assert from the dependency's real
+  behavior, don't trust that green = correct.
+
 - **Mirror the reference handler's full audio I/O conversion, not just the happy path.**
   When adding the Gemini Live backend I forwarded mic frames with a bare
   `array.squeeze().tobytes()`. The robot mic delivers **stereo and/or float at a
