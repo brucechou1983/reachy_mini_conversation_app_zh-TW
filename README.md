@@ -93,6 +93,7 @@ launchctl setenv GOOGLE_GENAI_USE_VERTEXAI false
 launchctl setenv GEMINI_API_KEY <你的_AI_STUDIO_KEY>
 launchctl setenv GEMINI_LIVE_MODEL_NAME gemini-3.1-flash-live-preview
 launchctl setenv REACHY_MINI_CUSTOM_PROFILE english_learner   # 選填：啟用英文學習遊戲
+launchctl setenv GEMINI_VOICE Leda                            # 選填：Gemini 語音（Leda/Kore/Aoede/Charon…）
 # 語速放慢預設關閉；要嘗試：launchctl setenv SPEECH_SLOWDOWN 1.4（調查中，部分後端可能無效）
 # 切回 Vertex 時改用：launchctl setenv GOOGLE_GENAI_USE_VERTEXAI true（並設好 GOOGLE_CLOUD_PROJECT）
 ```
@@ -201,7 +202,13 @@ pip install -e .[dev]
 |------|------|
 | `OPENAI_API_KEY` | 必填。用於存取 OpenAI 即時語音端點。
 | `MODEL_NAME` | 覆寫即時模型（預設為 `gpt-realtime`）。同時用於對話與視覺（除非使用 `--local-vision`）。
-| `GEMINI_API_KEY` | 選填。互動說故事工具（`story_book_create` 等）與長期記憶自動整理（記憶過多時合併去重）所需。可至 [Google AI Studio](https://aistudio.google.com) 取得。
+| `HANDLER_TYPE` | 對話後端：`openai`（預設）或 `gemini`（Gemini Live）。見「對話後端」章節。
+| `GEMINI_API_KEY` | 選填。互動說故事工具（`story_book_create` 等）、長期記憶自動整理，以及 AI Studio 的 Gemini Live 後端所需。可至 [Google AI Studio](https://aistudio.google.com) 取得。
+| `GEMINI_LIVE_MODEL_NAME` | `HANDLER_TYPE=gemini` 時的 Live 模型。AI Studio Flash 3：`gemini-3.1-flash-live-preview`；Vertex 預設 `gemini-live-2.5-flash-native-audio`。
+| `GEMINI_VOICE` | Gemini Live 的語音。預設 `Leda`；可選 `Puck`、`Kore`、`Aoede`、`Charon`、`Fenrir`、`Orus`、`Zephyr` 等。|
+| `GOOGLE_GENAI_USE_VERTEXAI` | 設 `true` 走 Vertex AI（用 ADC + 專案），留空走 AI Studio（用 `GEMINI_API_KEY`）。
+| `GOOGLE_CLOUD_PROJECT` | Vertex AI 的 GCP 專案 ID（`GOOGLE_GENAI_USE_VERTEXAI=true` 時必填）。
+| `GOOGLE_CLOUD_LOCATION` | Vertex AI 區域（預設 `us-central1`；Live API 不可用 `global`）。
 | `TAVILY_API_KEY` | 選填。啟用 `web_search` 工具進行即時網路搜尋。可至 [tavily.com](https://tavily.com) 取得。
 | `HF_HOME` | 本機 Hugging Face 下載的快取目錄（僅搭配 `--local-vision` 使用，預設為 `./cache`）。
 | `HF_TOKEN` | Hugging Face 模型的選用 Token（僅搭配 `--local-vision` 使用，也可用 `huggingface-cli login`）。
@@ -209,7 +216,6 @@ pip install -e .[dev]
 | `REACHY_MINI_CUSTOM_PROFILE` | 啟動時載入的 profile 名稱（`profiles/` 下的資料夾）。未設定時預設為 `default`。
 | `STORY_BOOKS_DIR` | 故事書的持久化儲存目錄。預設為 `~/.reachy_mini/books/`。
 | `SPEECH_SLOWDOWN` | 放慢汪汪語速給小朋友聽（保留音高的 WSOLA 時間延展）。**預設 `1.0`（關閉）**；設 `1.4` 可嘗試放慢（調查中：部分機器人音訊後端會重新計時，可能無效）。範圍 `[1.0, 2.5]`。|
-| `GEMINI_VOICE` | Gemini Live 的語音（`HANDLER_TYPE=gemini` 時）。預設 `Leda`；可選 `Puck`、`Kore`、`Aoede`、`Charon`、`Fenrir`、`Orus`、`Zephyr` 等。|
 
 ## 命令列選項
 
