@@ -44,6 +44,8 @@ class Config:
     # not yet published on Vertex AI; gemini-live-2.5-flash-native-audio is the current
     # working Vertex Live model. Override via env when Flash 3 lands on Vertex.
     GEMINI_LIVE_MODEL_NAME = os.getenv("GEMINI_LIVE_MODEL_NAME", "gemini-live-2.5-flash-native-audio")
+    # Gemini Live prebuilt voice (e.g. Leda, Puck, Kore, Aoede, Charon, Fenrir, Orus, Zephyr).
+    GEMINI_VOICE = os.getenv("GEMINI_VOICE", "Leda")
 
     # Route every Gemini call (Live conversation, storyteller, memory consolidation)
     # through Vertex AI instead of AI Studio. Vertex uses ADC (gcloud auth

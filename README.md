@@ -209,6 +209,7 @@ pip install -e .[dev]
 | `REACHY_MINI_CUSTOM_PROFILE` | 啟動時載入的 profile 名稱（`profiles/` 下的資料夾）。未設定時預設為 `default`。
 | `STORY_BOOKS_DIR` | 故事書的持久化儲存目錄。預設為 `~/.reachy_mini/books/`。
 | `SPEECH_SLOWDOWN` | 放慢汪汪語速給小朋友聽（保留音高的 WSOLA 時間延展）。**預設 `1.0`（關閉）**；設 `1.4` 可嘗試放慢（調查中：部分機器人音訊後端會重新計時，可能無效）。範圍 `[1.0, 2.5]`。|
+| `GEMINI_VOICE` | Gemini Live 的語音（`HANDLER_TYPE=gemini` 時）。預設 `Leda`；可選 `Puck`、`Kore`、`Aoede`、`Charon`、`Fenrir`、`Orus`、`Zephyr` 等。|
 
 ## 命令列選項
 
