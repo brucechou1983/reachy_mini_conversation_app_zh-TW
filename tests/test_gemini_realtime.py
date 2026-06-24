@@ -219,3 +219,61 @@ async def test_interrupted_flushes_playback():
 
     assert h.output_queue.empty()       # queued speech dropped
     assert cleared["n"] == 1            # player flushed
+
+
+def _server_content(**kw):
+    """Build a fake server_content with all the attrs _handle_server_content reads."""
+    defaults = {
+        "input_transcription": None,
+        "output_transcription": None,
+        "model_turn": None,
+        "turn_complete": None,
+        "interrupted": None,
+    }
+    defaults.update(kw)
+    return type("_SC", (), defaults)()
+
+
+@pytest.mark.asyncio
+async def test_client_barge_in_when_child_heard_while_speaking():
+    """User transcript arriving while the robot talks must stop playback at once."""
+    h = GeminiRealtimeHandler(MagicMock())
+    h._model_speaking = True
+    h.output_queue.put_nowait((24000, "stale-audio"))
+    cleared = {"n": 0}
+    h._clear_queue = lambda: cleared.__setitem__("n", cleared["n"] + 1)
+
+    sc = _server_content(input_transcription=type("_T", (), {"text": "停"})())
+    await h._handle_server_content(sc)
+
+    assert h.output_queue.empty()       # queued speech dropped
+    assert cleared["n"] == 1            # player flushed
+    assert h._model_speaking is False
+
+
+@pytest.mark.asyncio
+async def test_no_barge_in_when_robot_is_not_speaking():
+    """A user transcript while idle should not trigger a flush."""
+    h = GeminiRealtimeHandler(MagicMock())
+    h._model_speaking = False
+    cleared = {"n": 0}
+    h._clear_queue = lambda: cleared.__setitem__("n", cleared["n"] + 1)
+
+    sc = _server_content(input_transcription=type("_T", (), {"text": "hello"})())
+    await h._handle_server_content(sc)
+
+    assert cleared["n"] == 0
+
+
+@pytest.mark.asyncio
+async def test_model_turn_marks_speaking():
+    import numpy as np
+
+    h = GeminiRealtimeHandler(MagicMock())
+    inline = type("_I", (), {"mime_type": "audio/pcm", "data": np.zeros(160, dtype=np.int16).tobytes()})()
+    part = type("_P", (), {"inline_data": inline})()
+    sc = _server_content(model_turn=type("_MT", (), {"parts": [part]})())
+
+    await h._handle_server_content(sc)
+
+    assert h._model_speaking is True
