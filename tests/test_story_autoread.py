@@ -127,6 +127,35 @@ async def test_cancel_resets_state(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_estimate_accounts_for_slowdown(monkeypatch):
+    """Page-turn timing must stretch with SPEECH_SLOWDOWN, else pages turn early."""
+    from reachy_mini_conversation_app.config import config as cfg
+
+    h = _FakeHandler()
+    h._story_audio_samples = 24000  # 1.0s of 24 kHz audio
+    h._story_audio_start = asyncio.get_event_loop().time()  # elapsed ~0
+    monkeypatch.setattr(cfg, "STORY_PAGE_TURN_BUFFER_S", "1.0")
+
+    monkeypatch.setattr(cfg, "SPEECH_SLOWDOWN", "1.0")
+    assert 1.8 <= h._estimate_remaining_audio() <= 2.2   # ~1.0s dur + 1.0s buffer
+
+    monkeypatch.setattr(cfg, "SPEECH_SLOWDOWN", "2.0")
+    assert 2.8 <= h._estimate_remaining_audio() <= 3.2   # ~2.0s stretched + 1.0s buffer
+
+
+@pytest.mark.asyncio
+async def test_page_turn_buffer_is_configurable(monkeypatch):
+    from reachy_mini_conversation_app.config import config as cfg
+
+    h = _FakeHandler()
+    h._story_audio_samples = 0
+    h._story_audio_start = None
+    monkeypatch.setattr(cfg, "SPEECH_SLOWDOWN", "1.0")
+    monkeypatch.setattr(cfg, "STORY_PAGE_TURN_BUFFER_S", "2.5")
+    assert 2.4 <= h._estimate_remaining_audio() <= 2.6   # 0 dur + 2.5 buffer
+
+
+@pytest.mark.asyncio
 async def test_failed_go_to_page_stops_loop(monkeypatch):
     _mock_dispatch(monkeypatch, [{"status": "error", "error": "no such page"}])
     h = _FakeHandler()

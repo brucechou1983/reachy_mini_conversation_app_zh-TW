@@ -88,15 +88,34 @@ class StoryReaderMixin:
         self._story_audio_samples = 0
 
     def _estimate_remaining_audio(self) -> float:
-        """Seconds of narration audio still expected to play, plus a 1s buffer."""
+        """Seconds of narration audio still expected to play, plus a tail buffer.
+
+        ``audio_dur`` is the *playout* duration: the raw sample count is stretched
+        by ``SPEECH_SLOWDOWN`` because the player time-stretches output audio, so
+        it actually plays longer than the raw samples imply. Without this the page
+        turns before the (slowed) narration finishes.
+        """
+        from reachy_mini_conversation_app.config import config
+        from reachy_mini_conversation_app.audio_pace import get_speech_slowdown
+
         sr = self.output_sample_rate or 24000
-        audio_dur = self._story_audio_samples / sr
+        slowdown = get_speech_slowdown()  # >=1.0; 1.0 = off (no stretch)
+        audio_dur = (self._story_audio_samples / sr) * slowdown
         elapsed = (
             (asyncio.get_event_loop().time() - self._story_audio_start)
             if self._story_audio_start
             else 0.0
         )
-        return max(0.0, audio_dur - elapsed) + 1.0
+        try:
+            buffer = float(getattr(config, "STORY_PAGE_TURN_BUFFER_S", 1.0))
+        except (TypeError, ValueError):
+            buffer = 1.0
+        remaining = max(0.0, audio_dur - elapsed) + buffer
+        logger.info(
+            "story: page-turn in %.1fs (dur=%.1f×%.2f elapsed=%.1f buffer=%.1f)",
+            remaining, self._story_audio_samples / sr, slowdown, elapsed, buffer,
+        )
+        return remaining
 
     def note_story_audio(self, num_samples: int) -> None:
         """Accumulate narration audio so the next page is timed to its end."""
