@@ -7,7 +7,7 @@ import webbrowser
 from typing import Any, Dict, Optional
 
 from reachy_mini_conversation_app.story_store import Story, StoryPage, StoryStore
-from reachy_mini_conversation_app.book_library import BookLibrary
+from reachy_mini_conversation_app.book_library import KIND_STORY, BookLibrary
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
 
 
@@ -50,7 +50,7 @@ class StoryBookOpen(Tool):
 
         # No book_id: return library listing so LLM can pick one
         if not book_id:
-            books = library.list_books()
+            books = library.list_books(kind=KIND_STORY)
             if not books:
                 return {"status": "empty", "message": "書架上還沒有故事書喔！"}
             listing = [
@@ -63,8 +63,8 @@ class StoryBookOpen(Tool):
                 "message": "書架上有這些故事書，請問小朋友想讀哪一本。",
             }
 
-        # Load from disk
-        meta = library.get_book(book_id)
+        # Load from disk (story books only — never a read-along book)
+        meta = library.get_book(book_id, kind=KIND_STORY)
         if meta is None:
             return {"error": f"找不到 book_id={book_id} 的故事書"}
 

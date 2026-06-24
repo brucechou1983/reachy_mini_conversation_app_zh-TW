@@ -165,10 +165,18 @@ async def _generate_story(story_id: str, theme: str, num_pages: int, handler: An
         current_story = store.story
         if current_story and current_story.id == story_id:
             try:
-                from reachy_mini_conversation_app.book_library import BookLibrary
-                BookLibrary.get().save_book(current_story)
+                from reachy_mini_conversation_app.book_library import KIND_STORY, BookLibrary
+                BookLibrary.get().save_book(current_story, kind=KIND_STORY)
             except Exception as e:
                 logger.warning("Failed to save book to library: %s", e)
+
+        # If the child switched to another activity while this generated in the
+        # background, don't pop a story reader or start narrating over them.
+        from reachy_mini_conversation_app.activity_state import STORY, ActivityState
+        if ActivityState.get().current not in (STORY, None):
+            logger.info("Story ready but activity switched away (%s); not opening/reading",
+                        ActivityState.get().current)
+            return
 
         # Auto-open reader in browser
         webbrowser.open(f"http://localhost:7860/reader/books/{story_id}")

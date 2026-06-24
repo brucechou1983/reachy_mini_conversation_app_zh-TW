@@ -24,7 +24,11 @@ class StoryBookClose(Tool):
 
     async def __call__(self, deps: ToolDependencies, **kwargs: Any) -> Dict[str, Any]:
         """Close the active story in the store and confirm closure."""
+        from reachy_mini_conversation_app.activity_state import STORY, ActivityState
+
         logger.info("story_book_close called")
         store = StoryStore.get()
         store.close_story()
+        # Story activity ended → clear it so the read-along shelf becomes tappable again.
+        ActivityState.get().deactivate(STORY)
         return {"status": "closed", "message": "故事書已經關上了。"}

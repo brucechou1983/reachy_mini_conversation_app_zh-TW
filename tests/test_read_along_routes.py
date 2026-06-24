@@ -43,16 +43,20 @@ def _book():
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
+    from reachy_mini_conversation_app.activity_state import ActivityState
+
     monkeypatch.setattr(config, "STORY_BOOKS_DIR", str(tmp_path / "books"), raising=False)
     BookLibrary._instance = None
     ReadAlongStore._instance = None
     ReadAlongProgress._instance = None
+    ActivityState.get().reset()
     app = FastAPI()
     mount_story_routes(app)
     yield TestClient(app)
     BookLibrary._instance = None
     ReadAlongStore._instance = None
     ReadAlongProgress._instance = None
+    ActivityState.get().reset()
 
 
 # --- state route ---

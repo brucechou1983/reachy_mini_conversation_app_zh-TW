@@ -12,8 +12,10 @@ head_tracking
 take_photo
 do_nothing
 
-# === 故事工具 (shared) ===
+# === 說故事繪本工具 (AI 讀繪本活動，shared) ===
 story_book_create
+story_book_open
+story_book_shelf
 story_book_go_to_page
 story_book_close
 

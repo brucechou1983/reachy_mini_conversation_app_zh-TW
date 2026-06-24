@@ -258,6 +258,19 @@ async def test_finish_requires_session(deps):
 
 
 @pytest.mark.asyncio
+async def test_finish_deactivates_activity(deps):
+    """Finishing read-along clears the current activity (story shelf tappable again)."""
+    from reachy_mini_conversation_app.activity_state import READ_ALONG, ActivityState
+
+    ActivityState.get().reset()
+    await ReadAlongStart()(deps, book_id="sel-big-feelings")
+    ActivityState.get().activate(READ_ALONG)
+    await ReadAlongFinish()(deps, stars=3)
+    assert ActivityState.get().current is None
+    ActivityState.get().reset()
+
+
+@pytest.mark.asyncio
 async def test_finish_records_progress(deps):
     from reachy_mini_conversation_app.read_along_progress import ReadAlongProgress
 
