@@ -33,9 +33,10 @@ class Config:
     STORY_BOOKS_DIR = os.getenv("STORY_BOOKS_DIR")  # Optional, defaults to ~/.reachy_mini/books/
 
     # Slow the robot's speech for young children (pitch-preserving WSOLA time-stretch
-    # on output audio). 1.0 = normal; default 1.5 ≈ 1.5x slower. Clamped to [1.0, 2.5].
-    # Set SPEECH_SLOWDOWN=1.0 to disable, or 1.3 for a gentler slowdown.
-    SPEECH_SLOWDOWN = os.getenv("SPEECH_SLOWDOWN", "1.5")
+    # on output audio). 1.0 = off (default). Set e.g. 1.4 to try a 1.4x slowdown.
+    # NOTE: under investigation — on some robot audio backends the player re-times
+    # the buffer so this has no audible effect; kept off by default for now.
+    SPEECH_SLOWDOWN = os.getenv("SPEECH_SLOWDOWN", "1.0")
 
     # Conversation backend: "openai" (default, OpenAI Realtime) or "gemini" (Gemini Live).
     HANDLER_TYPE = os.getenv("HANDLER_TYPE", "openai")

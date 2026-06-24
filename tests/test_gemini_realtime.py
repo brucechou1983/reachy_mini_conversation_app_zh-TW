@@ -175,3 +175,47 @@ async def test_inject_camera_image_uses_video_not_deprecated_media():
     assert "video" in sent
     assert "media" not in sent
     assert isinstance(sent["video"], PIL.Image.Image)
+
+
+def test_live_config_enables_barge_in():
+    """The Live config must turn on interruption (START_OF_ACTIVITY_INTERRUPTS)."""
+    from google.genai import types
+
+    h = GeminiRealtimeHandler(MagicMock())
+    cfg = h._build_live_config("you are a robot", [])
+    ric = cfg["realtime_input_config"]
+    assert ric["activity_handling"] == types.ActivityHandling.START_OF_ACTIVITY_INTERRUPTS
+    aad = ric["automatic_activity_detection"]
+    assert aad["disabled"] is False
+    assert aad["start_of_speech_sensitivity"] == types.StartSensitivity.START_SENSITIVITY_HIGH
+
+
+@pytest.mark.asyncio
+async def test_drain_output_queue_empties_pending_audio():
+    h = GeminiRealtimeHandler(MagicMock())
+    for _ in range(5):
+        h.output_queue.put_nowait((24000, "frame"))
+    assert not h.output_queue.empty()
+    h._drain_output_queue()
+    assert h.output_queue.empty()
+
+
+@pytest.mark.asyncio
+async def test_interrupted_flushes_playback():
+    """On a Gemini 'interrupted' signal, queued audio is dropped and the player flushed."""
+    h = GeminiRealtimeHandler(MagicMock())
+    h.output_queue.put_nowait((24000, "stale-audio"))
+    cleared = {"n": 0}
+    h._clear_queue = lambda: cleared.__setitem__("n", cleared["n"] + 1)
+
+    class _SC:
+        interrupted = True
+        input_transcription = None
+        output_transcription = None
+        model_turn = None
+        turn_complete = None
+
+    await h._handle_server_content(_SC())
+
+    assert h.output_queue.empty()       # queued speech dropped
+    assert cleared["n"] == 1            # player flushed

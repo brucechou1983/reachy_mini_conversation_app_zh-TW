@@ -87,6 +87,37 @@ class GeminiRealtimeHandler(ConversationHandler):
                 )
         return [{"function_declarations": function_declarations}]
 
+    def _build_live_config(self, system_instruction: str, tools: Any) -> dict[str, Any]:
+        """Build the Gemini Live connect config.
+
+        Crucially this enables *barge-in*: with no ``realtime_input_config`` the
+        robot would keep talking over the child. ``START_OF_ACTIVITY_INTERRUPTS``
+        + a HIGH start-of-speech sensitivity make the server stop the model the
+        moment it hears someone speak (mirroring OpenAI's
+        ``server_vad`` + ``interrupt_response``). The receive loop then flushes
+        playback on the ``interrupted`` signal.
+        """
+        from google.genai import types
+
+        return {
+            "response_modalities": ["AUDIO"],
+            "system_instruction": system_instruction,
+            "tools": tools,
+            "speech_config": {
+                "voice_config": {"prebuilt_voice_config": {"voice_name": "Puck"}}
+            },
+            "input_audio_transcription": {},
+            "output_audio_transcription": {},
+            "realtime_input_config": {
+                "automatic_activity_detection": {
+                    "disabled": False,
+                    "start_of_speech_sensitivity": types.StartSensitivity.START_SENSITIVITY_HIGH,
+                    "end_of_speech_sensitivity": types.EndSensitivity.END_SENSITIVITY_HIGH,
+                },
+                "activity_handling": types.ActivityHandling.START_OF_ACTIVITY_INTERRUPTS,
+            },
+        }
+
     async def start_up(self) -> None:
         """Open the Gemini Live session (AI Studio or Vertex) and run the loop."""
         try:
@@ -106,16 +137,7 @@ class GeminiRealtimeHandler(ConversationHandler):
         )
         tools = self._convert_tool_specs_to_gemini_format()
 
-        config_dict = {
-            "response_modalities": ["AUDIO"],
-            "system_instruction": system_instruction,
-            "tools": tools,
-            "speech_config": {
-                "voice_config": {"prebuilt_voice_config": {"voice_name": "Puck"}}
-            },
-            "input_audio_transcription": {},
-            "output_audio_transcription": {},
-        }
+        config_dict = self._build_live_config(system_instruction, tools)
 
         # Reconnect loop: Gemini Live sessions drop (1011 internal errors, idle
         # timeouts, network) — re-establish with backoff instead of going deaf.
@@ -264,13 +286,27 @@ class GeminiRealtimeHandler(ConversationHandler):
                 self.output_transcription_buffer = ""
 
         if getattr(server_content, "interrupted", None):
+            logger.info("Barge-in: user spoke, stopping playback")
+            # Drop audio we've already queued, then flush the player buffer so
+            # the robot goes quiet immediately instead of finishing its turn.
+            self._drain_output_queue()
             clear = getattr(self, "_clear_queue", None)
             if callable(clear):
                 clear()
             if self.deps.head_wobbler is not None:
                 self.deps.head_wobbler.reset()
+            self.deps.movement_manager.set_listening(True)
             self.input_transcription_buffer = ""
             self.output_transcription_buffer = ""
+
+    def _drain_output_queue(self) -> None:
+        """Drop any pending output (queued model audio/text) in place."""
+        q = self.output_queue
+        while not q.empty():
+            try:
+                q.get_nowait()
+            except asyncio.QueueEmpty:
+                break
 
     def _to_gemini_pcm(self, frame: Tuple[int, NDArray[np.int16]]) -> bytes:
         """Convert a mic frame to Gemini Live's required format: 16 kHz, s16le, mono.
