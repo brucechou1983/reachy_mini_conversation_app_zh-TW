@@ -138,9 +138,15 @@ async def _generate_story(story_id: str, theme: str, num_pages: int, handler: An
         connected = getattr(handler, "connection", None) or getattr(handler, "session", None)
         if handler and connected and hasattr(handler, "begin_story_autoread"):
             try:
+                logger.info("Story ready — starting auto-read (%s)", type(handler).__name__)
                 await handler.begin_story_autoread(1)
             except Exception as e:
                 logger.warning("Failed to start story auto-read: %s", e)
+        else:
+            logger.warning(
+                "Story ready but auto-read NOT started (handler=%s connected=%s has_method=%s)",
+                handler is not None, bool(connected), hasattr(handler, "begin_story_autoread"),
+            )
 
     except Exception as e:
         logger.exception("Story generation failed: %s", e)

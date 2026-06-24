@@ -22,6 +22,24 @@ Patterns captured after user corrections, so the same mistake isn't repeated.
 
 ## Audio / realtime backends
 
+- **Don't tear down long-running client state on a barge-in that fires on echo.**
+  The Gemini story auto-read stalled after page 1: a spurious server ``interrupted``
+  (the robot's own narration echoing into the always-on mic during the multi-second
+  wait between pages) reached ``_barge_in()``, which unconditionally called
+  ``cancel_story_advance()`` and cancelled the pending next-page task — the
+  ``CancelledError`` was swallowed, so there was no ``go_to_page`` log and no error
+  (the model then improvised ``do_nothing``). The OpenAI handler never had this: it
+  cancels story-advance only on ``input_audio_buffer.speech_started`` (a genuine
+  user-speech event), never on its own audio. Fix: ``_barge_in(suppress, cancel_story)``
+  — always flush playback, but only ``cancel_story=True`` from real-user paths
+  (heard-child transcript / local mic energy), and on a bare server ``interrupted``
+  only when ``input_transcription_buffer`` is non-empty (a real child spoke). Rule:
+  "stop the current audio" and "abandon the multi-step task" are different actions;
+  gate the destructive one on a *confirmed* user signal, since on a robot without
+  AEC the interrupt signal alone is not proof a human spoke.
+
+
+
 - **When a fix has "no audible effect," read the *installed SDK source* — methods
   go silently no-op.** Barge-in "依然沒有停" for many attempts even though detection
   logged correctly. Root cause: `clear_audio_queue` gated on
