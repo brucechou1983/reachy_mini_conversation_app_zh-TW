@@ -70,6 +70,7 @@ class GeminiRealtimeHandler(ConversationHandler):
         self.output_transcription_buffer = ""
         # True while the model is producing speech, used for client-side barge-in.
         self._model_speaking = False
+        self._logged_mic_while_speaking = False
 
     def copy(self) -> "GeminiRealtimeHandler":
         """Create a fresh handler instance for a new session."""
@@ -283,6 +284,7 @@ class GeminiRealtimeHandler(ConversationHandler):
 
         if getattr(server_content, "turn_complete", None):
             self._model_speaking = False
+            self._logged_mic_while_speaking = False
             self.deps.movement_manager.set_listening(False)
             if self.input_transcription_buffer.strip():
                 await self.output_queue.put(
@@ -304,6 +306,7 @@ class GeminiRealtimeHandler(ConversationHandler):
     def _barge_in(self) -> None:
         """Stop the robot talking immediately: drop queued audio + flush player."""
         self._model_speaking = False
+        self._logged_mic_while_speaking = False
         # Drop audio we've already queued, then flush the player buffer so the
         # robot goes quiet at once instead of finishing its turn.
         self._drain_output_queue()
@@ -354,6 +357,11 @@ class GeminiRealtimeHandler(ConversationHandler):
         """Forward a microphone frame to Gemini as 16 kHz s16le mono PCM."""
         if not self.session:
             return
+        # Diagnostic: confirm the mic keeps reaching Gemini *while the robot is
+        # speaking* — that's the prerequisite for barge-in. Logs once per turn.
+        if self._model_speaking and not self._logged_mic_while_speaking:
+            logger.info("Mic frames reaching Gemini while robot speaks (barge-in input path OK)")
+            self._logged_mic_while_speaking = True
         audio_bytes = self._to_gemini_pcm(frame)
         try:
             # ``data`` must be RAW PCM bytes — the SDK base64-encodes it for the
