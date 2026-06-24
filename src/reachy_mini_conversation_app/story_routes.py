@@ -29,6 +29,12 @@ class TapPayload(BaseModel):
     index: int
 
 
+class SelectPayload(BaseModel):
+    """Body for a bookshelf selection: the chosen book's id."""
+
+    book_id: str
+
+
 def mount_story_routes(app: FastAPI) -> None:
     """Register story bookshelf and reader routes."""
     # ------------------------------------------------------------------ #
@@ -260,6 +266,46 @@ def mount_story_routes(app: FastAPI) -> None:
         _inject_tap(store, word)
         return JSONResponse({"ok": True, "index": payload.index, "word": word})
 
+    # Visual bookshelf: kids see the curated SEL books and pick one.
+    @app.get("/reader/read-along")
+    def _read_along_shelf() -> FileResponse:
+        return FileResponse(str(STATIC_DIR / "read_along_shelf.html"))
+
+    @app.get("/reader/api/read-along/books")
+    def _read_along_book_list() -> JSONResponse:
+        from .read_along_books import catalog
+        from .read_along_progress import ReadAlongProgress
+
+        library = BookLibrary.get()
+        progress = ReadAlongProgress.get()
+        result = []
+        for b in catalog():
+            book_id = str(b["id"])
+            has_cover = library.page_image_path(book_id, 0) is not None
+            rec = progress.get_book(book_id) or {}
+            result.append({
+                **b,
+                "cover_url": f"/reader/api/books/{book_id}/pages/0/image" if has_cover else None,
+                "completed": bool(rec.get("completed")),
+                "stars": int(rec.get("stars", 0)),
+            })
+        return JSONResponse(result)
+
+    @app.post("/reader/api/read-along/select")
+    async def _read_along_select(payload: SelectPayload) -> JSONResponse:
+        from .read_along_books import get_book
+
+        book = get_book(payload.book_id)
+        if book is None:
+            return JSONResponse({"error": "unknown_book"}, status_code=404)
+        # Best-effort: nudge the robot to begin coaching this book.
+        _inject_select(ReadAlongStore.get(), book.id, book.title)
+        return JSONResponse({
+            "ok": True,
+            "book_id": book.id,
+            "reader_url": f"/reader/read-along/{book.id}",
+        })
+
     @app.get("/reader/read-along/{book_id}")
     def _read_along_page(book_id: str) -> FileResponse:
         _check_book_id(book_id)
@@ -285,15 +331,16 @@ async def read_along_event_stream(store: ReadAlongStore) -> AsyncIterator[str]:
         store.unsubscribe(q)
 
 
-def _inject_tap(store: ReadAlongStore, word: str) -> None:
-    """Best-effort: ask the bound robot handler to sound out a tapped word."""
+def _inject_to_handler(store: ReadAlongStore, text: str) -> None:
+    """Best-effort: deliver a user-role message to the bound robot handler.
+
+    Schedules the coroutine on the handler's event loop (which may differ from
+    the request loop), so a browser action (tap / book selection) can reach the
+    live realtime session.
+    """
     handler = store.handler
     if handler is None or not hasattr(handler, "inject_user_text"):
         return
-    text = (
-        f"[小朋友在繪本上點了單字「{word}」，請溫柔地幫他把這個字一個音一個音拆音念出來，"
-        "再把整個字清楚念一次示範。]"
-    )
     coro = handler.inject_user_text(text)
     loop = store.loop
     try:
@@ -306,5 +353,23 @@ def _inject_tap(store: ReadAlongStore, word: str) -> None:
         else:
             asyncio.ensure_future(coro)
     except Exception as e:  # pragma: no cover - defensive
-        logger.warning("read-along tap injection failed: %s", e)
+        logger.warning("read-along handler injection failed: %s", e)
         coro.close()
+
+
+def _inject_tap(store: ReadAlongStore, word: str) -> None:
+    """Best-effort: ask the bound robot handler to sound out a tapped word."""
+    _inject_to_handler(
+        store,
+        f"[小朋友在繪本上點了單字「{word}」，請溫柔地幫他把這個字一個音一個音拆音念出來，"
+        "再把整個字清楚念一次示範。]",
+    )
+
+
+def _inject_select(store: ReadAlongStore, book_id: str, title: str) -> None:
+    """Best-effort: tell the robot the child picked a book on the shelf."""
+    _inject_to_handler(
+        store,
+        f"[孩子在書架上選了繪本《{title}》(book_id={book_id})。"
+        f'請馬上呼叫 read_along_start(book_id="{book_id}") 開始帶讀。]',
+    )

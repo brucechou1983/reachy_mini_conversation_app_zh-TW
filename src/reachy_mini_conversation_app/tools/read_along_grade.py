@@ -37,6 +37,8 @@ class ReadAlongGrade(Tool):
     description = (
         "小朋友讀完一整頁後，一次回報哪些英文字讀對(correct)、哪些讀錯或漏掉(incorrect)。"
         "仔細聽每一個字：只要有字沒讀對或漏掉，就要放進 incorrect，不要全部當成讀對。"
+        "重聽重判：他重讀時若還是讀成原本的錯音（例如 scared 讀成 said）仍要放 incorrect，"
+        "不要因為他試了第二次就放水——只有真的讀對才放 correct。"
         "系統會把對的標綠、錯的標記提示，並回傳還沒讀對的字。整頁全綠才能 read_along_next_page。"
     )
     parameters_schema = {

@@ -23,6 +23,7 @@ from reachy_mini_conversation_app.read_along_store import (
     STATE_SOUND_OUT,
     ReadAlongStore,
 )
+from reachy_mini_conversation_app.read_along_progress import ReadAlongProgress
 
 
 def _book():
@@ -42,14 +43,16 @@ def _book():
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
-    monkeypatch.setattr(config, "STORY_BOOKS_DIR", str(tmp_path), raising=False)
+    monkeypatch.setattr(config, "STORY_BOOKS_DIR", str(tmp_path / "books"), raising=False)
     BookLibrary._instance = None
     ReadAlongStore._instance = None
+    ReadAlongProgress._instance = None
     app = FastAPI()
     mount_story_routes(app)
     yield TestClient(app)
     BookLibrary._instance = None
     ReadAlongStore._instance = None
+    ReadAlongProgress._instance = None
 
 
 # --- state route ---
@@ -103,6 +106,64 @@ def test_read_along_page_serves_html(client):
 
 def test_read_along_page_rejects_bad_id(client):
     assert client.get("/reader/read-along/..%2Fevil").status_code in (400, 404)
+
+
+# --- bookshelf ---
+
+
+def test_shelf_serves_html(client):
+    resp = client.get("/reader/read-along")
+    assert resp.status_code == 200
+    assert "read_along_shelf.js" in resp.text
+
+
+def test_shelf_books_api_lists_curated_books(client):
+    resp = client.get("/reader/api/read-along/books")
+    assert resp.status_code == 200
+    books = resp.json()
+    assert any(b["id"] == "sel-big-feelings" for b in books)
+    for b in books:
+        assert "completed" in b and "stars" in b and "cover_url" in b
+
+
+def test_shelf_books_api_reflects_completion(client):
+    ReadAlongProgress.get().mark_completed("sel-big-feelings", stars=5)
+    books = client.get("/reader/api/read-along/books").json()
+    done = next(b for b in books if b["id"] == "sel-big-feelings")
+    assert done["completed"] is True
+    assert done["stars"] == 5
+
+
+def test_select_unknown_book_404(client):
+    assert client.post("/reader/api/read-along/select", json={"book_id": "nope"}).status_code == 404
+
+
+def test_select_known_book_returns_reader_url(client):
+    resp = client.post("/reader/api/read-along/select", json={"book_id": "sel-big-feelings"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["reader_url"] == "/reader/read-along/sel-big-feelings"
+
+
+@pytest.mark.asyncio
+async def test_select_injects_to_handler():
+    ReadAlongStore._instance = None
+    store = ReadAlongStore.get()
+    captured = {}
+
+    class FakeHandler:
+        async def inject_user_text(self, text, respond=True):
+            captured["text"] = text
+
+    store.bind_handler(FakeHandler(), asyncio.get_running_loop())
+    from reachy_mini_conversation_app.story_routes import _inject_select
+
+    _inject_select(store, "sel-big-feelings", "My Big Feelings")
+    await asyncio.sleep(0.05)
+    assert "sel-big-feelings" in captured["text"]
+    assert "read_along_start" in captured["text"]
+    ReadAlongStore._instance = None
 
 
 # --- SSE generator emits the snapshot on connect, then live events ---

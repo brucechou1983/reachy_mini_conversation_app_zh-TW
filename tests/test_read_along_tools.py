@@ -41,13 +41,20 @@ def _mark_page_done(store):
 
 
 @pytest.fixture(autouse=True)
-def _reset_store(monkeypatch):
+def _reset_store(monkeypatch, tmp_path):
+    from reachy_mini_conversation_app.config import config
+    from reachy_mini_conversation_app.read_along_progress import ReadAlongProgress
+
     ReadAlongStore._instance = None
+    # Isolate persistent progress to a tmp dir (don't touch ~/.reachy_mini).
+    monkeypatch.setattr(config, "STORY_BOOKS_DIR", str(tmp_path / "books"), raising=False)
+    ReadAlongProgress._instance = None
     # Don't touch disk / Gemini / browser during tool tests.
     monkeypatch.setattr(start_mod, "ensure_book_assets", lambda book: {"imported": True, "illustrating": False})
     monkeypatch.setattr(start_mod.webbrowser, "open", lambda *a, **k: True)
     yield
     ReadAlongStore._instance = None
+    ReadAlongProgress._instance = None
 
 
 @pytest.fixture
@@ -63,7 +70,23 @@ async def test_start_lists_books_without_id(deps):
     result = await ReadAlongStart()(deps)
     assert result["status"] == "listing"
     assert result["books"]
-    assert any(b["id"] == "sel-big-feelings" for b in result["books"])
+    assert result["shelf_url"].endswith("/reader/read-along")
+    book = next(b for b in result["books"] if b["id"] == "sel-big-feelings")
+    assert book["completed"] is False  # nothing read yet
+    assert "stars" in book
+    # opening the shelf binds the handler so a shelf tap can start coaching
+    assert ReadAlongStore.get().handler is deps.realtime_handler
+
+
+@pytest.mark.asyncio
+async def test_listing_reflects_completed_books(deps):
+    from reachy_mini_conversation_app.read_along_progress import ReadAlongProgress
+
+    ReadAlongProgress.get().mark_completed("sel-big-feelings", stars=4)
+    result = await ReadAlongStart()(deps)
+    book = next(b for b in result["books"] if b["id"] == "sel-big-feelings")
+    assert book["completed"] is True
+    assert book["stars"] == 4
 
 
 @pytest.mark.asyncio
@@ -232,6 +255,17 @@ async def test_finish_clamps_stars(deps):
 async def test_finish_requires_session(deps):
     result = await ReadAlongFinish()(deps)
     assert "error" in result
+
+
+@pytest.mark.asyncio
+async def test_finish_records_progress(deps):
+    from reachy_mini_conversation_app.read_along_progress import ReadAlongProgress
+
+    await ReadAlongStart()(deps, book_id="sel-big-feelings")
+    await ReadAlongFinish()(deps, stars=4)
+    prog = ReadAlongProgress.get()
+    assert prog.is_completed("sel-big-feelings") is True
+    assert prog.stars("sel-big-feelings") == 4
 
 
 def test_tools_are_registered_names():

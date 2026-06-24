@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="zh-TW">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>繪本書架 - 跟著汪汪讀</title>
+    <link rel="stylesheet" href="/static/read_along.css" />
+  </head>
+  <body class="shelf-body">
+    <header class="shelf-head">
+      <div class="shelf-emoji">📚</div>
+      <h1>選一本書 <span class="shelf-sub">Choose a book</span></h1>
+      <p class="shelf-hint">點一本你想讀的繪本，汪汪會陪你一起讀 🐶</p>
+    </header>
+
+    <main id="grid" class="shelf-grid" aria-busy="true"></main>
+
+    <div id="empty" class="shelf-empty" hidden>還沒有繪本喔。</div>
+
+    <script src="/static/read_along_shelf.js"></script>
+  </body>
+</html>
