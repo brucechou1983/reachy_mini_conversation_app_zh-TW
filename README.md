@@ -275,6 +275,9 @@ pip install -e .[dev]
 | `GET /reader/api/books` | 列出書庫中所有已儲存的書籍。 |
 | `GET /reader/api/books/{book_id}/download` | 以 ZIP 壓縮檔下載書籍。 |
 | `DELETE /reader/api/books/{book_id}` | 從書庫刪除書籍。 |
+| `GET /reader/read-along` | 繪本書架：小朋友看畫面選書（讀過的有綠色勾勾）。 |
+| `GET /reader/api/read-along/books` | 書架書目 JSON（含封面、是否讀過、星星）。 |
+| `POST /reader/api/read-along/select` | 小朋友在書架點選一本書（通知汪汪開始帶讀）。 |
 | `GET /reader/read-along/{book_id}` | 繪本帶讀閱讀器介面（Ello 式，逐字互動）。 |
 | `GET /reader/read-along/events` | 帶讀的 SSE 串流（翻頁、單字狀態、星星）。 |
 | `GET /reader/read-along/state` | 當前帶讀工作階段的 JSON 快照。 |
@@ -330,8 +333,8 @@ LLM 透過 `save_memory` / `forget_memory`（全域）與 `save_profile_memory` 
 借鑑 [Ello](https://ello.com) 的閱讀帶讀法：**小朋友自己讀、汪汪在旁邊聽並引導**，不是機器人把整本唸完。讀物是**手寫精選、SEL（社會情緒學習）主題**的英文小繪本（不用 LLM 隨機生成），讓讀英文的同時學情緒。
 
 ### 帶讀流程（與 Ello 一致）
-1. 汪汪用 `read_along_start` 列出繪本，讓小朋友挑一本（情緒主題）。
-2. 打開閱讀器（`/reader/read-along/<book_id>`），顯示背景插圖 + 前景大字。
+1. 汪汪用 `read_along_start` **打開繪本書架**（`/reader/read-along`）—— 小朋友看畫面選書，**讀過的書有綠色勾勾**（進度存在本機 `read_along_progress.json`）。可直接點螢幕或說書名。
+2. 選好後打開閱讀器（`/reader/read-along/<book_id>`），顯示背景插圖 + 前景大字。
 3. **暖身**目標單字 → 邀請小朋友讀這一頁。
 4. 小朋友讀完整頁 → 汪汪用 `read_along_grade` 批改（讀對的標綠、讀錯/漏掉的標記提示）。
 5. 卡住/讀錯 → 階梯式引導：第 1 次 **bounce（跳動）**、第 2 次 **highlight（標示）**、第 3 次/點字 **sound-out（拆音）** → 示範念整個字（miss 自動升級）。

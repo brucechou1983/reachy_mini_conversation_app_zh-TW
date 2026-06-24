@@ -311,3 +311,137 @@ body {
     font-size: 16px;
   }
 }
+
+/* ---- Bookshelf ---- */
+.shelf-body {
+  overflow-y: auto;
+  background: radial-gradient(circle at 50% 0%, #2a1f3d, var(--ra-bg));
+}
+
+.shelf-head {
+  text-align: center;
+  padding: 36px 20px 8px;
+}
+
+.shelf-emoji {
+  font-size: 56px;
+}
+
+.shelf-head h1 {
+  font-size: 30px;
+  color: var(--ra-accent);
+  margin-top: 6px;
+}
+
+.shelf-sub {
+  font-size: 17px;
+  color: var(--ra-muted);
+  font-weight: 500;
+}
+
+.shelf-hint {
+  color: var(--ra-muted);
+  margin-top: 8px;
+  font-size: 16px;
+}
+
+.shelf-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 22px;
+  padding: 28px;
+  max-width: 1000px;
+  margin: 0 auto;
+}
+
+.book-card2 {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  text-align: center;
+  background: linear-gradient(135deg, #2a2035, #1e1828);
+  border: 1px solid rgba(255, 209, 102, 0.18);
+  border-radius: 18px;
+  padding: 0 0 14px;
+  overflow: hidden;
+  cursor: pointer;
+  color: var(--ra-text);
+  font-family: inherit;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.book-card2:hover,
+.book-card2:focus-visible {
+  transform: translateY(-5px);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.45);
+  outline: none;
+}
+
+.book-card2.done {
+  border-color: rgba(123, 216, 143, 0.6);
+}
+
+.book-card2.selecting {
+  opacity: 0.55;
+  transform: scale(0.97);
+}
+
+.cover-wrap {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.cover-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.cover-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 72px;
+  background: radial-gradient(circle at 50% 40%, #3a2d52, #221a30);
+}
+
+.done-badge {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: var(--ra-green);
+  color: #10240f;
+  font-size: 22px;
+  font-weight: 900;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+}
+
+.card-title {
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--ra-accent);
+  padding: 12px 12px 2px;
+  line-height: 1.25;
+}
+
+.card-meta {
+  font-size: 14px;
+  color: var(--ra-muted);
+}
+
+.shelf-empty {
+  text-align: center;
+  color: var(--ra-muted);
+  padding: 60px 20px;
+  font-size: 17px;
+}

@@ -10,6 +10,7 @@ from typing import Any, Dict
 
 from reachy_mini_conversation_app.read_along_store import ReadAlongStore
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
+from reachy_mini_conversation_app.read_along_progress import ReadAlongProgress
 
 
 logger = logging.getLogger(__name__)
@@ -52,8 +53,14 @@ class ReadAlongFinish(Tool):
             stars = _DEFAULT_STARS
         stars = max(1, min(_MAX_STARS, stars))
 
+        book_id = store.session.book_id
         result = store.finish(stars)
         assert result is not None
+        # Persist completion so the bookshelf shows a green check next time.
+        try:
+            ReadAlongProgress.get().mark_completed(book_id, result["stars"])
+        except Exception as e:  # never let persistence break the reward
+            logger.warning("Failed to record read-along progress: %s", e)
         return {
             "status": "finished",
             "stars": result["stars"],
