@@ -22,6 +22,24 @@ Patterns captured after user corrections, so the same mistake isn't repeated.
 
 ## Audio / realtime backends
 
+- **To time "the speaker finished," measure the actual push stream, don't guess a
+  duration.** Story page-turns fired too early. A duration *estimate* (samples/rate
+  + buffer, even ×SPEECH_SLOWDOWN) is fragile: realtime backends deliver audio at
+  different rates, the player time-stretches it, and push_audio_sample() is
+  non-blocking (feeds the speaker faster than realtime), so when generation ends
+  there's still buffered audio. The robust method (which we'd built before and a
+  refactor regressed): a **sentinel** enqueued behind the page's audio chunks;
+  ``play_loop`` tallies the *actual pushed* audio duration (post time-stretch, so
+  slowdown is automatically included) and the real first-push timestamp, and when
+  it dequeues the sentinel computes ``remaining = pushed_duration − elapsed`` — the
+  exact buffer still draining — then waits that + a small buffer. Rule: when you
+  need "playback finished," instrument the component that actually feeds the
+  speaker; a time estimate computed upstream (at generation end) can't see the
+  downstream buffer or the stretch. Keep the estimate only as a fallback for
+  transports without that instrumentation.
+
+
+
 - **Don't tear down long-running client state on a barge-in that fires on echo.**
   The Gemini story auto-read stalled after page 1: a spurious server ``interrupted``
   (the robot's own narration echoing into the always-on mic during the multi-second

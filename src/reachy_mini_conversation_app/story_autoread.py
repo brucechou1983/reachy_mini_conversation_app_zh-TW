@@ -55,6 +55,12 @@ class StoryReaderMixin:
         self._story_advance_task: Optional[asyncio.Task[None]] = None
         self._story_audio_start: Optional[float] = None
         self._story_audio_samples: int = 0
+        # Accurate page-turn timing: play_loop measures the ACTUAL pushed (post
+        # time-stretch) audio for the current page and, when it reaches the
+        # ``story_audio_done`` sentinel, reports how much is still buffered to play
+        # via ``_story_playback_remaining`` + sets ``_story_playback_done``.
+        self._story_playback_done: Optional[asyncio.Event] = None
+        self._story_playback_remaining: float = 0.0
 
     # ------------------------------------------------------------------
     # Backend-specific primitive
@@ -86,6 +92,8 @@ class StoryReaderMixin:
         self._story_advance_task = None
         self._story_audio_start = None
         self._story_audio_samples = 0
+        self._story_playback_done = None
+        self._story_playback_remaining = 0.0
 
     def _estimate_remaining_audio(self) -> float:
         """Seconds of narration audio still expected to play, plus a tail buffer.
@@ -134,16 +142,19 @@ class StoryReaderMixin:
         )
         if self._story_audio_samples <= 0:
             return
-        if self._story_advance_task is not None and not self._story_advance_task.done():
+        if pending:
             return  # an advance is already pending
+        # Drop a sentinel BEHIND all of this page's audio chunks. play_loop will
+        # reach it once everything has been pushed and report the exact remaining
+        # playout time (accurate; includes time-stretch) via the event below.
+        try:
+            self.output_queue.put_nowait(AdditionalOutputs({"role": "story_audio_done"}))
+        except Exception:  # pragma: no cover - defensive
+            pass
         if self._story_next_page is not None:
-            wait = self._estimate_remaining_audio()
-            self._story_advance_task = asyncio.create_task(
-                self._story_auto_advance(self._story_next_page, wait)
-            )
+            self._story_advance_task = asyncio.create_task(self._story_auto_advance(self._story_next_page))
         elif self._story_is_last_page:
-            wait = self._estimate_remaining_audio()
-            self._story_advance_task = asyncio.create_task(self._story_auto_close(wait))
+            self._story_advance_task = asyncio.create_task(self._story_auto_close())
 
     async def apply_story_page_result(self, tool_result: Dict[str, Any]) -> None:
         """Record next-page state from a ``go_to_page`` result and narrate this page.
@@ -155,6 +166,9 @@ class StoryReaderMixin:
         self._story_is_last_page = bool(tool_result.get("is_last_page", False))
         self._story_audio_start = None
         self._story_audio_samples = 0
+        # Arm playout tracking for THIS page so play_loop counts its pushed audio.
+        self._story_playback_done = asyncio.Event()
+        self._story_playback_remaining = 0.0
         logger.info(
             "story: narrating page=%s (next=%s last=%s)",
             tool_result.get("page"), self._story_next_page, self._story_is_last_page,
@@ -165,15 +179,45 @@ class StoryReaderMixin:
         """Kick off client-driven reading from ``page`` (book ready / manual start)."""
         logger.info("story: begin auto-read from page=%s (%s)", page, type(self).__name__)
         self.cancel_story_advance()
-        self._story_advance_task = asyncio.create_task(self._story_auto_advance(page, 0.0))
+        # First page: nothing is playing yet, so don't wait for prior playout.
+        self._story_advance_task = asyncio.create_task(
+            self._story_auto_advance(page, wait_playback=False)
+        )
 
-    async def _story_auto_advance(self, page: int, wait_seconds: float) -> None:
+    def _page_turn_buffer(self) -> float:
+        """Extra seconds to wait after a page finishes before turning it."""
+        from reachy_mini_conversation_app.config import config
+
+        try:
+            return float(getattr(config, "STORY_PAGE_TURN_BUFFER_S", 1.0))
+        except (TypeError, ValueError):
+            return 1.0
+
+    async def _story_wait_for_playback(self) -> None:
+        """Block until the current page's narration has actually finished playing.
+
+        Primary path: the play_loop sentinel reports the exact remaining buffered
+        playout (accurate, time-stretch-aware). Fallback (e.g. a transport with no
+        sentinel-aware play_loop): the duration estimate.
+        """
+        ev = self._story_playback_done
+        if ev is not None:
+            try:
+                await asyncio.wait_for(ev.wait(), timeout=180.0)
+                wait = max(0.0, self._story_playback_remaining) + self._page_turn_buffer()
+                logger.info("story: playback done, turning page in %.1fs", wait)
+                await asyncio.sleep(wait)
+                return
+            except asyncio.TimeoutError:
+                logger.warning("story: playback sentinel timed out; using duration estimate")
+        await asyncio.sleep(self._estimate_remaining_audio())
+
+    async def _story_auto_advance(self, page: int, wait_playback: bool = True) -> None:
         """Wait for the current page's audio to finish, then narrate ``page``."""
         try:
-            logger.info("story: auto-advance start page=%s wait=%.1fs", page, wait_seconds)
-            if wait_seconds:
-                logger.info("Story auto-advance: waiting %.1fs before page %s", wait_seconds, page)
-                await asyncio.sleep(wait_seconds)
+            logger.info("story: auto-advance to page=%s (wait_playback=%s)", page, wait_playback)
+            if wait_playback:
+                await self._story_wait_for_playback()
             await self._story_wait_idle()
             result = await dispatch_tool_call(
                 "story_book_go_to_page", json.dumps({"page": page}), self.deps
@@ -188,11 +232,10 @@ class StoryReaderMixin:
         except asyncio.CancelledError:
             logger.info("Story auto-advance to page %s cancelled", page)
 
-    async def _story_auto_close(self, wait_seconds: float) -> None:
+    async def _story_auto_close(self) -> None:
         """Wait for the last page's audio to finish, then close and wrap up."""
         try:
-            if wait_seconds:
-                await asyncio.sleep(wait_seconds)
+            await self._story_wait_for_playback()
             await self._story_wait_idle()
             result = await dispatch_tool_call("story_book_close", "{}", self.deps)
             await self._push_story_log(result)
