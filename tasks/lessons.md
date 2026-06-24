@@ -19,6 +19,34 @@ Patterns captured after user corrections, so the same mistake isn't repeated.
   touching your own logic. Don't branch on SDK enums that the SDK may normalize —
   prefer `getattr(obj, "real_method", None)` capability checks.
 
+- **Fixing one thing exposes what it was masking — echo self-interrupt.** Once
+  the barge-in flush actually worked (`clear_player`), a new symptom appeared:
+  "no response" and the storyteller stopping mid-page. Cause: the robot has no
+  echo cancellation, so it hears its *own* voice; Gemini's server VAD fires a
+  spurious `interrupted` that — now that the flush is real — kills the robot's own
+  reply. Previously the no-op flush hid this. Two defenses, both default-on and
+  tunable: (a) an interrupt **grace** (`INTERRUPT_GRACE_MS`) ignoring interrupts
+  in the first moments of a reply (covers the tail of the user's own question);
+  (b) an **echo gate** — only honor an interrupt if the recent mic peak rose above
+  `BARGE_IN_LEVEL` (a real person speaks up; mere echo stays below). Measure the
+  robot's echo floor vs. real-speech level from logs (here echo <0.06< speech
+  ~0.085) to pick the threshold. Rule: after fixing a masking bug, expect latent
+  bugs it hid to surface, and re-test the whole interaction.
+
+- **End-of-turn VAD must be patient for kids.** Gemini Live with
+  `END_SENSITIVITY_HIGH` cut a child's turn on the pause inside "等⋯一下",
+  answering "等" then asking what "一下" meant. Use `END_SENSITIVITY_LOW` + an
+  explicit `silence_duration_ms` (~900ms), keep start sensitivity HIGH so barge-in
+  stays instant. The SDK's `AutomaticActivityDetection` exposes
+  `silence_duration_ms`/`prefix_padding_ms` — prefer the explicit ms knobs over
+  the HIGH/LOW preset.
+
+- **Constrain tool enums in the schema, not just the description.** `play_emotion`
+  listed valid names only in the param *description*, so the model emitted
+  'shaking1' and the call failed. Add a JSON-schema `enum` of the real names
+  (function-calling grammar then forbids invalid values). Degrade to a plain
+  string (no empty `enum`, which forbids everything) when the list is unavailable.
+
 - **A client-side barge-in must suppress the rest of the aborted turn, not just
   flush once.** After flushing playback locally (mic energy / heard-child), Gemini
   keeps streaming the *same* interrupted turn until its own server VAD sends
