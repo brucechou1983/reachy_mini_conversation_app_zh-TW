@@ -47,6 +47,16 @@ class Config:
     # Gemini Live prebuilt voice (e.g. Leda, Puck, Kore, Aoede, Charon, Fenrir, Orus, Zephyr).
     GEMINI_VOICE = os.getenv("GEMINI_VOICE", "Leda")
 
+    # Gemini Live end-of-turn detection. Young children speak slowly with pauses
+    # between words ("等… 一下"), and with an eager end-of-speech detector the
+    # server cuts the turn mid-phrase and answers the fragment. GEMINI_VAD_SILENCE_MS
+    # is how long the child must stay silent before their turn is considered over
+    # (higher = more patient, but slower to reply). GEMINI_VAD_PREFIX_MS keeps a
+    # little audio before speech onset so the first word isn't clipped. Start-of-
+    # speech stays sensitive so barge-in (interrupting the robot) is still instant.
+    GEMINI_VAD_SILENCE_MS = os.getenv("GEMINI_VAD_SILENCE_MS", "900")
+    GEMINI_VAD_PREFIX_MS = os.getenv("GEMINI_VAD_PREFIX_MS", "300")
+
     # Client-side barge-in: stop playback locally when the mic hears sustained speech
     # while the robot is talking — for robots whose server-side VAD won't interrupt.
     # OFF by default (can self-interrupt if the robot lacks echo cancellation).
@@ -54,6 +64,14 @@ class Config:
     # self-triggers, lower if it doesn't catch you.
     BARGE_IN_LOCAL = os.getenv("BARGE_IN_LOCAL", "").strip().lower() in ("1", "true", "yes")
     BARGE_IN_LEVEL = os.getenv("BARGE_IN_LEVEL", "0.06")
+
+    # Ignore an "interrupt" in the first moments of the robot's own reply. Without
+    # echo cancellation the robot hears itself (or the tail of the child's words)
+    # the instant it starts talking, which fires a spurious server interrupt that
+    # kills the reply before it's audible — the child experiences "no response".
+    # This grace (ms) lets the reply get going; real barge-ins land after it.
+    # Lower it if you can't interrupt right when the robot starts; 0 = disabled.
+    INTERRUPT_GRACE_MS = os.getenv("INTERRUPT_GRACE_MS", "500")
 
     # Route every Gemini call (Live conversation, storyteller, memory consolidation)
     # through Vertex AI instead of AI Studio. Vertex uses ADC (gcloud auth

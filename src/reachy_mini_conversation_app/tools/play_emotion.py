@@ -20,6 +20,17 @@ except ImportError as e:
     EMOTION_AVAILABLE = False
 
 
+def get_available_emotion_names() -> list[str]:
+    """Return the list of valid emotion names (empty if the library is absent)."""
+    if not EMOTION_AVAILABLE:
+        return []
+    try:
+        return list(RECORDED_MOVES.list_moves())
+    except Exception as e:
+        logger.warning("Could not list emotions: %s", e)
+        return []
+
+
 def get_available_emotions_and_descriptions() -> str:
     """Get formatted list of available emotions with descriptions."""
     if not EMOTION_AVAILABLE:
@@ -36,6 +47,25 @@ def get_available_emotions_and_descriptions() -> str:
         return f"Error getting emotions: {e}"
 
 
+def _emotion_param_schema() -> Dict[str, Any]:
+    """Build the emotion arg schema with a strict ``enum``.
+
+    The ``enum`` constrains the model to real names; without it the model
+    hallucinates names like 'shaking1' and the call fails.
+    """
+    schema: Dict[str, Any] = {
+        "type": "string",
+        "description": (
+            "Name of the emotion to play.\n"
+            f"{get_available_emotions_and_descriptions()}"
+        ),
+    }
+    names = get_available_emotion_names()
+    if names:
+        schema["enum"] = names
+    return schema
+
+
 class PlayEmotion(Tool):
     """Play a pre-recorded emotion."""
 
@@ -44,13 +74,7 @@ class PlayEmotion(Tool):
     parameters_schema = {
         "type": "object",
         "properties": {
-            "emotion": {
-                "type": "string",
-                "description": f"""Name of the emotion to play.
-                                    Here is a list of the available emotions:
-                                    {get_available_emotions_and_descriptions()}
-                                    """,
-            },
+            "emotion": _emotion_param_schema(),
         },
         "required": ["emotion"],
     }

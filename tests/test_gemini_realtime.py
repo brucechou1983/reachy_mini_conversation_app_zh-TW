@@ -191,6 +191,40 @@ def test_live_config_enables_barge_in():
     assert aad["start_of_speech_sensitivity"] == types.StartSensitivity.START_SENSITIVITY_HIGH
 
 
+def test_live_config_is_patient_about_end_of_turn():
+    """End-of-speech must be patient so a child's mid-phrase pause doesn't split
+    the turn (regression: "等一下" answered as "等" then "一下"?)."""
+    from google.genai import types
+
+    h = GeminiRealtimeHandler(MagicMock())
+    aad = h._build_live_config("you are a robot", [])["realtime_input_config"][
+        "automatic_activity_detection"
+    ]
+    assert aad["end_of_speech_sensitivity"] == types.EndSensitivity.END_SENSITIVITY_LOW
+    assert aad["silence_duration_ms"] >= 700   # room for slow speech / pauses
+    assert aad["prefix_padding_ms"] >= 0
+
+
+def test_live_config_vad_timing_is_env_tunable(monkeypatch):
+    from reachy_mini_conversation_app.config import config as cfg
+
+    monkeypatch.setattr(cfg, "GEMINI_VAD_SILENCE_MS", "1500")
+    monkeypatch.setattr(cfg, "GEMINI_VAD_PREFIX_MS", "250")
+    h = GeminiRealtimeHandler(MagicMock())
+    aad = h._build_live_config("x", [])["realtime_input_config"]["automatic_activity_detection"]
+    assert aad["silence_duration_ms"] == 1500
+    assert aad["prefix_padding_ms"] == 250
+
+
+def test_live_config_vad_timing_falls_back_on_bad_value(monkeypatch):
+    from reachy_mini_conversation_app.config import config as cfg
+
+    monkeypatch.setattr(cfg, "GEMINI_VAD_SILENCE_MS", "not-a-number")
+    h = GeminiRealtimeHandler(MagicMock())
+    aad = h._build_live_config("x", [])["realtime_input_config"]["automatic_activity_detection"]
+    assert aad["silence_duration_ms"] == 900
+
+
 @pytest.mark.asyncio
 async def test_drain_output_queue_empties_pending_audio():
     h = GeminiRealtimeHandler(MagicMock())
@@ -317,16 +351,19 @@ async def test_audio_plays_again_once_mute_window_lapses():
 
 
 @pytest.mark.asyncio
-async def test_heard_child_barge_in_arms_mute_window():
-    """A client-side (heard-child) barge-in must mute until the server catches up."""
+async def test_heard_child_barge_in_flushes_without_arming_mute():
+    """Heard-child barge-in flushes, but must NOT arm the mute window — the server
+    manages that turn, and muting here could swallow the start of the reply."""
     h = GeminiRealtimeHandler(MagicMock())
     h._model_speaking = True
-    h._clear_queue = lambda: None
+    flushed = {"n": 0}
+    h._clear_queue = lambda: flushed.__setitem__("n", flushed["n"] + 1)
 
     sc = _server_content(input_transcription=type("_T", (), {"text": "停"})())
     await h._handle_server_content(sc)
 
-    assert h._mute_until > asyncio.get_event_loop().time()
+    assert flushed["n"] == 1          # playback flushed
+    assert h._mute_until == 0.0       # but no mute window (local path only)
 
 
 @pytest.mark.asyncio
@@ -363,6 +400,130 @@ async def test_local_barge_in_arms_mute_but_server_interrupt_does_not():
     assert h._mute_until == 0.0
 
 
+@pytest.mark.asyncio
+async def test_interrupt_ignored_within_grace():
+    """A spurious interrupt right as the reply starts (echo) must NOT flush —
+    otherwise the robot kills its own reply and the child gets no response."""
+    h = GeminiRealtimeHandler(MagicMock())
+    h._interrupt_grace_s = 0.5
+    h._model_speaking = True
+    h._model_speech_start = asyncio.get_event_loop().time()  # just started
+    flushed = {"n": 0}
+    h._clear_queue = lambda: flushed.__setitem__("n", flushed["n"] + 1)
+    h.input_transcription_buffer = "kept"
+
+    await h._handle_server_content(_server_content(interrupted=True))
+
+    assert flushed["n"] == 0                      # reply NOT cut off
+    assert h._model_speaking is True
+    assert h.input_transcription_buffer == "kept"  # buffers untouched
+
+
+@pytest.mark.asyncio
+async def test_interrupt_honored_after_grace():
+    """Past the grace window AND with a real (loud) voice, an interrupt flushes."""
+    h = GeminiRealtimeHandler(MagicMock())
+    h._interrupt_grace_s = 0.5
+    h._model_speaking = True
+    h._model_speech_start = asyncio.get_event_loop().time() - 10.0  # long ago
+    h._recent_mic_peak = 0.5  # clearly louder than the robot's echo
+    flushed = {"n": 0}
+    h._clear_queue = lambda: flushed.__setitem__("n", flushed["n"] + 1)
+
+    await h._handle_server_content(_server_content(interrupted=True))
+
+    assert flushed["n"] == 1
+
+
+@pytest.mark.asyncio
+async def test_interrupt_grace_zero_flushes_immediately():
+    h = GeminiRealtimeHandler(MagicMock())
+    h._interrupt_grace_s = 0.0
+    h._model_speaking = True
+    h._model_speech_start = asyncio.get_event_loop().time()
+    h._recent_mic_peak = 0.5  # real voice, so the echo gate doesn't block it
+    flushed = {"n": 0}
+    h._clear_queue = lambda: flushed.__setitem__("n", flushed["n"] + 1)
+
+    await h._handle_server_content(_server_content(interrupted=True))
+
+    assert flushed["n"] == 1
+
+
+def test_interrupt_grace_reads_config(monkeypatch):
+    from reachy_mini_conversation_app.config import config as cfg
+
+    monkeypatch.setattr(cfg, "INTERRUPT_GRACE_MS", "750")
+    h = GeminiRealtimeHandler(MagicMock())
+    assert h._interrupt_grace_s == 0.75
+
+
+@pytest.mark.asyncio
+async def test_echo_gate_ignores_interrupt_when_mic_quiet():
+    """A server interrupt while the robot speaks but the mic never rose above the
+    echo floor is the robot hearing itself — must NOT cut the reply (story stuck)."""
+    h = GeminiRealtimeHandler(MagicMock())
+    h._interrupt_grace_s = 0.0          # isolate the echo gate from the grace
+    h._barge_level = 0.06
+    h._model_speaking = True
+    h._model_speech_start = asyncio.get_event_loop().time() - 10.0  # long past grace
+    h._recent_mic_peak = 0.02           # only echo, below threshold
+    flushed = {"n": 0}
+    h._clear_queue = lambda: flushed.__setitem__("n", flushed["n"] + 1)
+
+    await h._handle_server_content(_server_content(interrupted=True))
+
+    assert flushed["n"] == 0            # reply keeps going
+    assert h._model_speaking is True
+
+
+@pytest.mark.asyncio
+async def test_echo_gate_honors_interrupt_when_mic_loud():
+    h = GeminiRealtimeHandler(MagicMock())
+    h._interrupt_grace_s = 0.0
+    h._barge_level = 0.06
+    h._model_speaking = True
+    h._model_speech_start = asyncio.get_event_loop().time() - 10.0
+    h._recent_mic_peak = 0.2            # real person, above the echo floor
+    flushed = {"n": 0}
+    h._clear_queue = lambda: flushed.__setitem__("n", flushed["n"] + 1)
+
+    await h._handle_server_content(_server_content(interrupted=True))
+
+    assert flushed["n"] == 1
+
+
+@pytest.mark.asyncio
+async def test_echo_gate_disabled_with_zero_threshold():
+    """BARGE_IN_LEVEL=0 disables the echo gate (peak is never < 0)."""
+    h = GeminiRealtimeHandler(MagicMock())
+    h._interrupt_grace_s = 0.0
+    h._barge_level = 0.0
+    h._model_speaking = True
+    h._model_speech_start = asyncio.get_event_loop().time() - 10.0
+    h._recent_mic_peak = 0.0
+    flushed = {"n": 0}
+    h._clear_queue = lambda: flushed.__setitem__("n", flushed["n"] + 1)
+
+    await h._handle_server_content(_server_content(interrupted=True))
+
+    assert flushed["n"] == 1
+
+
+@pytest.mark.asyncio
+async def test_reply_start_resets_mic_peak():
+    """Each new reply starts with a clean echo baseline."""
+    import numpy as np
+
+    h = GeminiRealtimeHandler(MagicMock())
+    h._recent_mic_peak = 0.9  # leftover from the user's question
+    inline = type("_I", (), {"mime_type": "audio/pcm", "data": np.zeros(160, dtype=np.int16).tobytes()})()
+    part = type("_P", (), {"inline_data": inline})()
+    await h._handle_server_content(_server_content(model_turn=type("_MT", (), {"parts": [part]})()))
+
+    assert h._recent_mic_peak == 0.0
+
+
 def test_live_config_uses_configured_voice():
     """Voice comes from config.GEMINI_VOICE (default Leda)."""
     from reachy_mini_conversation_app.config import config
@@ -384,9 +545,9 @@ async def test_local_barge_in_triggers_on_sustained_loud_speech():
     cleared = {"n": 0}
     h._clear_queue = lambda: cleared.__setitem__("n", cleared["n"] + 1)
 
-    loud = np.full(320, 3000, dtype=np.int16)  # mean-abs/32768 ≈ 0.09 > 0.05
+    loud = h._frame_level(np.full(320, 3000, dtype=np.int16))  # ≈ 0.09 > 0.05
     for _ in range(h._BARGE_SUSTAIN):
-        h._maybe_local_barge_in((16000, loud))
+        h._maybe_local_barge_in(loud)
 
     assert cleared["n"] >= 1
     assert h._model_speaking is False
@@ -402,9 +563,9 @@ async def test_local_barge_in_ignores_quiet_mic():
     cleared = {"n": 0}
     h._clear_queue = lambda: cleared.__setitem__("n", cleared["n"] + 1)
 
-    quiet = np.full(320, 100, dtype=np.int16)  # ≈ 0.003
+    quiet = h._frame_level(np.full(320, 100, dtype=np.int16))  # ≈ 0.003
     for _ in range(10):
-        h._maybe_local_barge_in((16000, quiet))
+        h._maybe_local_barge_in(quiet)
     assert cleared["n"] == 0
 
 
@@ -418,7 +579,7 @@ async def test_local_barge_in_respects_grace_period():
     cleared = {"n": 0}
     h._clear_queue = lambda: cleared.__setitem__("n", cleared["n"] + 1)
 
-    loud = np.full(320, 3000, dtype=np.int16)
+    loud = h._frame_level(np.full(320, 3000, dtype=np.int16))
     for _ in range(5):
-        h._maybe_local_barge_in((16000, loud))
+        h._maybe_local_barge_in(loud)
     assert cleared["n"] == 0
