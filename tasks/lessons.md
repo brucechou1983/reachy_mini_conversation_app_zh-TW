@@ -170,6 +170,36 @@ Patterns captured after user corrections, so the same mistake isn't repeated.
   infinite `StreamingResponse` generator. Extract the async generator to a
   module-level function and drive it directly with `anext()` + `asyncio.wait_for`.
 
+## Generative content quality (images + copy)
+
+- **For multi-page character consistency, lock the cast with ONE reference image,
+  then condition every page on it.** The first storybook pipeline generated each
+  page's illustration independently from the page text, so the same character looked
+  different on every page. The user's direction was the right pattern: generate a
+  single front-view *character reference sheet* first, then feed that image back as
+  an input to each page's generation (gemini-2.5-flash-image / "Nano Banana" is
+  built for this) with a prompt that restates the cast and demands "exactly
+  consistent with the reference image." Also **separate the narration text from the
+  image brief**: the page `text` (what the child hears, Traditional Chinese) is a
+  poor image prompt — have the writer also emit an English `scene` per page, and use
+  that for the illustrator. Rule: consistency across many generations comes from a
+  shared *anchor artifact* fed into each call, not from hoping independent calls
+  converge; and never reuse human-facing prose as an image prompt.
+
+- **Describe an art style by its visual traits, not only by the artist's name.**
+  Naming a living artist (工藤紀子) can be ignored or filtered by the image model. Bake
+  a rich description of the look (line weight, flat gouache fills, rounded chunky
+  characters, palette, composition) into a reusable `_STYLE` constant applied to
+  both the reference sheet and every page, with the name as a soft hint. A generic
+  "soft watercolor" prompt yields characterless output.
+
+- **Put picture-book craft in the writing prompt explicitly.** "簡短、溫暖、有趣" gives
+  bland copy. Inject concrete techniques the model can act on: a clear story arc
+  (want → obstacle → turn → warm resolution), a recurring refrain the child can
+  predict and say along, onomatopoeia, show-don't-tell sensory detail, read-aloud
+  rhythm, and page-turn hooks. Generate the cast + all pages in one structured-JSON
+  call so text and characters stay coherent.
+
 ## LLM-driven interactions
 
 - **Enforce hard rules in code, not in the prompt.** First cut of the read-along

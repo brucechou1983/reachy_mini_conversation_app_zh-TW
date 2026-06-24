@@ -47,12 +47,23 @@ def _missing_illustrations(book: ReadAlongBook) -> list[int]:
     return [i for i in range(book.page_count) if library.page_image_path(book.id, i) is None]
 
 
+def _read_along_image_prompt(theme: str, illustration: str, page_num: int, total: int) -> str:
+    """Soft-watercolor SEL illustration prompt (read-along keeps its own gentle look)."""
+    return (
+        "Generate a cute storybook illustration.\n\n"
+        f"Story theme: {theme}\n"
+        f"Page {page_num} of {total}: {illustration}\n\n"
+        "Style: soft watercolor painting with warm colors, expressive cute characters, "
+        "picture book art style. No text or words in the image."
+    )
+
+
 async def generate_illustrations(book: ReadAlongBook) -> int:
     """Generate and cache any missing page illustrations. Returns count generated."""
     if not config.GEMINI_AVAILABLE:
         return 0
     # Imported lazily to avoid pulling the Gemini SDK at module import time.
-    from reachy_mini_conversation_app.tools.story_book_create import _generate_illustration
+    from reachy_mini_conversation_app.tools.story_book_create import generate_book_image
 
     library = BookLibrary.get()
     book_dir = library.book_dir(book.id)
@@ -61,7 +72,8 @@ async def generate_illustrations(book: ReadAlongBook) -> int:
     for i in _missing_illustrations(book):
         page = book.pages[i]
         try:
-            image_b64, mime = await _generate_illustration(theme, page.illustration, i + 1, book.page_count)
+            prompt = _read_along_image_prompt(theme, page.illustration, i + 1, book.page_count)
+            image_b64, mime = await generate_book_image(prompt)
         except Exception as e:  # never let illustration failures break reading
             logger.warning("Illustration gen failed for %s page %d: %s", book.id, i, e)
             continue
