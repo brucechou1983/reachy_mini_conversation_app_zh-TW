@@ -63,3 +63,12 @@ Patterns captured after user corrections, so the same mistake isn't repeated.
   reliable call instead of N hoped-for `cue` calls. Rule: any invariant the user
   expects ("all words read before advancing") must be enforced deterministically
   in the tool/store; the LLM supplies observations, the code polices the rule.
+
+## Test isolation
+
+- **Don't inject `sys.modules[...] = MagicMock()` for installed deps in a test
+  that sorts early.** `test_camera.py` mocked `openai`/`gradio`/`fastrtc`; because
+  it collects before `test_gemini_realtime`/`test_openai_realtime`, it replaced
+  those real modules and 25 handler tests failed. Those packages are real deps —
+  just import normally (like `test_take_photo.py`). Only mock truly-absent
+  hardware modules, and prefer not to pollute global `sys.modules` at all.
