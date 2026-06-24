@@ -68,6 +68,8 @@ class GeminiRealtimeHandler(ConversationHandler):
 
         self.input_transcription_buffer = ""
         self.output_transcription_buffer = ""
+        # True while the model is producing speech, used for client-side barge-in.
+        self._model_speaking = False
 
     def copy(self) -> "GeminiRealtimeHandler":
         """Create a fresh handler instance for a new session."""
@@ -253,6 +255,12 @@ class GeminiRealtimeHandler(ConversationHandler):
         transcription = getattr(server_content, "input_transcription", None)
         if transcription is not None and getattr(transcription, "text", None):
             self.deps.movement_manager.set_listening(True)
+            # Client-side barge-in: as soon as the child is heard while the robot
+            # is talking, stop playback ourselves — don't wait for the server's
+            # 'interrupted' decision (which can be slow or never arrive).
+            if self._model_speaking and not self.input_transcription_buffer:
+                logger.info("Barge-in (heard child): stopping playback")
+                self._barge_in()
             self.input_transcription_buffer += transcription.text
 
         transcription = getattr(server_content, "output_transcription", None)
@@ -270,9 +278,11 @@ class GeminiRealtimeHandler(ConversationHandler):
                         if self.deps.head_wobbler is not None:
                             self.deps.head_wobbler.feed(base64.b64encode(audio_bytes).decode())
                         self.last_activity_time = asyncio.get_event_loop().time()
+                        self._model_speaking = True
                         await self.output_queue.put((self.output_sample_rate, audio_array))
 
         if getattr(server_content, "turn_complete", None):
+            self._model_speaking = False
             self.deps.movement_manager.set_listening(False)
             if self.input_transcription_buffer.strip():
                 await self.output_queue.put(
@@ -286,18 +296,23 @@ class GeminiRealtimeHandler(ConversationHandler):
                 self.output_transcription_buffer = ""
 
         if getattr(server_content, "interrupted", None):
-            logger.info("Barge-in: user spoke, stopping playback")
-            # Drop audio we've already queued, then flush the player buffer so
-            # the robot goes quiet immediately instead of finishing its turn.
-            self._drain_output_queue()
-            clear = getattr(self, "_clear_queue", None)
-            if callable(clear):
-                clear()
-            if self.deps.head_wobbler is not None:
-                self.deps.head_wobbler.reset()
-            self.deps.movement_manager.set_listening(True)
+            logger.info("Barge-in (server interrupted): stopping playback")
+            self._barge_in()
             self.input_transcription_buffer = ""
             self.output_transcription_buffer = ""
+
+    def _barge_in(self) -> None:
+        """Stop the robot talking immediately: drop queued audio + flush player."""
+        self._model_speaking = False
+        # Drop audio we've already queued, then flush the player buffer so the
+        # robot goes quiet at once instead of finishing its turn.
+        self._drain_output_queue()
+        clear = getattr(self, "_clear_queue", None)
+        if callable(clear):
+            clear()
+        if self.deps.head_wobbler is not None:
+            self.deps.head_wobbler.reset()
+        self.deps.movement_manager.set_listening(True)
 
     def _drain_output_queue(self) -> None:
         """Drop any pending output (queued model audio/text) in place."""
