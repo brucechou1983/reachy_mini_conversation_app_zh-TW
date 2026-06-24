@@ -29,9 +29,15 @@ for _mod in (
 from reachy_mini_conversation_app.tools import read_along_start as start_mod  # noqa: E402
 from reachy_mini_conversation_app.read_along_store import ReadAlongStore  # noqa: E402
 from reachy_mini_conversation_app.tools.read_along_cue import ReadAlongCue  # noqa: E402
+from reachy_mini_conversation_app.tools.read_along_grade import ReadAlongGrade  # noqa: E402
 from reachy_mini_conversation_app.tools.read_along_start import ReadAlongStart  # noqa: E402
 from reachy_mini_conversation_app.tools.read_along_finish import ReadAlongFinish  # noqa: E402
 from reachy_mini_conversation_app.tools.read_along_next_page import ReadAlongNextPage  # noqa: E402
+
+
+def _mark_page_done(store):
+    """Mark every word on the current page as read correctly (test helper)."""
+    store.grade(list(store.session.current_words), [])
 
 
 @pytest.fixture(autouse=True)
@@ -125,12 +131,26 @@ async def test_cue_invalid_state_errors(deps):
 
 
 @pytest.mark.asyncio
-async def test_next_page_advances(deps):
+async def test_next_page_advances_when_page_complete(deps):
     await ReadAlongStart()(deps, book_id="sel-big-feelings")
+    _mark_page_done(ReadAlongStore.get())
     result = await ReadAlongNextPage()(deps)
     assert result["status"] == "ok"
     assert result["page"] == 2
     assert result["words"]
+
+
+@pytest.mark.asyncio
+async def test_next_page_blocked_until_all_words_read(deps):
+    """The signature fix: can't advance until every word is green."""
+    await ReadAlongStart()(deps, book_id="sel-big-feelings")
+    store = ReadAlongStore.get()
+    # Only one word read correctly -> must NOT advance.
+    store.cue("feelings", "success")
+    result = await ReadAlongNextPage()(deps)
+    assert result["status"] == "not_complete"
+    assert result["remaining_words"]
+    assert store.session.current_page == 0  # did not move
 
 
 @pytest.mark.asyncio
@@ -144,8 +164,49 @@ async def test_next_page_on_last_reports_last(deps):
     await ReadAlongStart()(deps, book_id="sel-big-feelings")
     store = ReadAlongStore.get()
     store.go_to_page(store.session.total_pages - 1)
+    _mark_page_done(store)
     result = await ReadAlongNextPage()(deps)
     assert result["status"] == "last_page"
+
+
+# --- read_along_grade ---
+
+
+@pytest.mark.asyncio
+async def test_grade_marks_correct_and_incorrect(deps):
+    await ReadAlongStart()(deps, book_id="sel-big-feelings")  # "I have many feelings"
+    result = await ReadAlongGrade()(deps, correct=["I", "have", "many"], incorrect=["feelings"])
+    assert result["status"] == "ok"
+    assert result["complete"] is False
+    assert "feelings" in result["remaining_words"]
+
+
+@pytest.mark.asyncio
+async def test_grade_completes_page(deps):
+    await ReadAlongStart()(deps, book_id="sel-big-feelings")
+    result = await ReadAlongGrade()(deps, correct=["I", "have", "many", "feelings"], incorrect=[])
+    assert result["complete"] is True
+    assert result["remaining_words"] == []
+
+
+@pytest.mark.asyncio
+async def test_grade_accepts_string_lists(deps):
+    await ReadAlongStart()(deps, book_id="sel-big-feelings")
+    result = await ReadAlongGrade()(deps, correct="I have many feelings", incorrect="")
+    assert result["complete"] is True
+
+
+@pytest.mark.asyncio
+async def test_grade_requires_session(deps):
+    result = await ReadAlongGrade()(deps, correct=["x"], incorrect=[])
+    assert "error" in result
+
+
+@pytest.mark.asyncio
+async def test_grade_empty_errors(deps):
+    await ReadAlongStart()(deps, book_id="sel-big-feelings")
+    result = await ReadAlongGrade()(deps, correct=[], incorrect=[])
+    assert "error" in result
 
 
 # --- read_along_finish ---
@@ -176,5 +237,6 @@ async def test_finish_requires_session(deps):
 def test_tools_are_registered_names():
     assert ReadAlongStart.name == "read_along_start"
     assert ReadAlongCue.name == "read_along_cue"
+    assert ReadAlongGrade.name == "read_along_grade"
     assert ReadAlongNextPage.name == "read_along_next_page"
     assert ReadAlongFinish.name == "read_along_finish"

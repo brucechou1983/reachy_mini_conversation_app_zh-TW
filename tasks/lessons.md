@@ -51,3 +51,15 @@ Patterns captured after user corrections, so the same mistake isn't repeated.
   `TestClient.stream` (blocking portal) and httpx `ASGITransport` hang on an
   infinite `StreamingResponse` generator. Extract the async generator to a
   module-level function and drive it directly with `anext()` + `asyncio.wait_for`.
+
+## LLM-driven interactions
+
+- **Enforce hard rules in code, not in the prompt.** First cut of the read-along
+  let the LLM decide when a page was "done" and when to flag a misread; on real
+  hardware Gemini Flash advanced after marking only one word green and missed a
+  deliberate misread (user: 「一個字綠就給我過了」). Fix: a server-side gate —
+  `read_along_next_page` refuses to advance unless every word is `success`, plus a
+  batched `read_along_grade(correct, incorrect)` so per-word grading is one
+  reliable call instead of N hoped-for `cue` calls. Rule: any invariant the user
+  expects ("all words read before advancing") must be enforced deterministically
+  in the tool/store; the LLM supplies observations, the code polices the rule.

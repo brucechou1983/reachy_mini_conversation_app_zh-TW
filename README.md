@@ -249,7 +249,8 @@ pip install -e .[dev]
 | `story_book_close` | 關閉故事閱讀器，回到一般對話模式。 | 需要正在進行的故事工作階段。 |
 | `read_along_start` | 開始 Ello 式英文繪本帶讀（不帶參數則列出精選 SEL 繪本）。 | 僅需基本安裝（插圖需 `GEMINI_API_KEY`）。 |
 | `read_along_cue` | 在閱讀器上標記單字：miss（自動跳動→highlight→拆音）、success、sound_out、clear。 | 需要正在進行的帶讀工作階段。 |
-| `read_along_next_page` | 小朋友讀完一頁後翻到下一頁。 | 需要正在進行的帶讀工作階段。 |
+| `read_along_grade` | 小朋友讀完一頁後一次批改：回報讀對(correct)與讀錯/漏掉(incorrect)的字。 | 需要正在進行的帶讀工作階段。 |
+| `read_along_next_page` | 翻到下一頁。**整頁每個字都讀對（全綠）才放行**，否則回傳還沒讀對的字。 | 需要正在進行的帶讀工作階段。 |
 | `read_along_finish` | 結束帶讀並顯示星星獎勵畫面。 | 需要正在進行的帶讀工作階段。 |
 | `do_nothing` | 明確保持閒置。 | 僅需基本安裝。 |
 
@@ -332,11 +333,12 @@ LLM 透過 `save_memory` / `forget_memory`（全域）與 `save_profile_memory` 
 1. 汪汪用 `read_along_start` 列出繪本，讓小朋友挑一本（情緒主題）。
 2. 打開閱讀器（`/reader/read-along/<book_id>`），顯示背景插圖 + 前景大字。
 3. **暖身**目標單字 → 邀請小朋友讀這一頁。
-4. 讀對 → 稱讚 + 單字打勾（`read_along_cue` success）→ 翻頁（`read_along_next_page`）。
-5. 卡住 → 階梯式引導：第 1 次 **bounce（跳動）**、第 2 次 **highlight（標示）**、第 3 次/點字 **sound-out（拆音）** → 示範念整個字（`read_along_cue` miss 會自動升級）。
-6. **永遠不說「錯」**；每頁讀完做一個開放式**情緒/理解對話**。
-7. 讀完整本 → `read_along_finish` 給星星獎勵。
-8. 小朋友也可以**直接用手點閱讀器上的單字**求助，汪汪就會幫他拆音。
+4. 小朋友讀完整頁 → 汪汪用 `read_along_grade` 批改（讀對的標綠、讀錯/漏掉的標記提示）。
+5. 卡住/讀錯 → 階梯式引導：第 1 次 **bounce（跳動）**、第 2 次 **highlight（標示）**、第 3 次/點字 **sound-out（拆音）** → 示範念整個字（miss 自動升級）。
+6. **整頁每個字都讀對（全綠）才能翻頁** —— `read_along_next_page` 會硬擋沒讀完的頁，回傳還沒讀對的字（解決「只讀對一個字就放過」）。
+7. **永遠不說「錯」**；每頁讀完做一個開放式**情緒/理解對話**。
+8. 讀完整本 → `read_along_finish` 給星星獎勵。
+9. 小朋友也可以**直接用手點閱讀器上的單字**求助，汪汪就會幫他拆音。
 
 ### 內建繪本（SEL 主題）
 | 繪本 | 主題 |

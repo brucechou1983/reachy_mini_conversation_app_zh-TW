@@ -36,6 +36,20 @@ class ReadAlongNextPage(Tool):
         if session is None:
             return {"error": "目前沒有正在進行的繪本帶讀"}
 
+        # Gate: don't advance until every word on this page is read correctly.
+        if not session.page_complete:
+            remaining = session.remaining_words()
+            return {
+                "status": "not_complete",
+                "remaining_words": remaining,
+                "message": (
+                    f"還不能翻頁！這一頁還有 {len(remaining)} 個字沒讀對："
+                    f"{', '.join(remaining)}。先帶小朋友把每個字都讀對"
+                    "（讀對就 read_along_cue(word, \"success\")，或用 read_along_grade 一次批改），"
+                    "整頁全部變綠色才可以翻頁。"
+                ),
+            }
+
         if session.is_last_page:
             return {
                 "status": "last_page",
@@ -58,5 +72,8 @@ class ReadAlongNextPage(Tool):
             "tricky": list(page.tricky),
             "sel_prompt": page.sel_prompt,
             "is_last_page": is_last,
-            "instruction": "邀請小朋友讀這一頁，他讀你聽。讀對就 read_along_cue success，再翻頁。",
+            "instruction": (
+                "邀請小朋友讀這一頁，他讀你聽。讀完用 read_along_grade 批改"
+                "（讀錯/漏掉的放 incorrect）。整頁全綠才能再翻頁。"
+            ),
         }

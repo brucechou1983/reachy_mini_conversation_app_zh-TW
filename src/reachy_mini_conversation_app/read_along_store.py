@@ -105,6 +105,18 @@ class ReadAlongSession:
         """Return True when the current page is the last page."""
         return self.current_page >= self.total_pages - 1
 
+    def remaining_words(self) -> List[str]:
+        """Return current-page words not yet read correctly (not ``success``)."""
+        return [
+            w for i, w in enumerate(self.current_words)
+            if self.word_states.get(i) != STATE_SUCCESS
+        ]
+
+    @property
+    def page_complete(self) -> bool:
+        """Return True only when every word on the page is marked ``success``."""
+        return not self.remaining_words()
+
 
 class ReadAlongStore:
     """Singleton in-process store for the active read-along session."""
@@ -256,6 +268,23 @@ class ReadAlongStore:
         }
         self._broadcast(event)
         return {"index": idx, "word": word_text, "state": effective, "miss": miss}
+
+    def grade(self, correct: List[str], incorrect: List[str]) -> Optional[Dict[str, Any]]:
+        """Grade a whole page in one call: mark misses then successes.
+
+        Misses are applied first so a word that is both wrong-then-right ends as
+        success.  Returns the still-unread words and whether the page is complete.
+        """
+        if not self._session:
+            return None
+        for w in incorrect or []:
+            self.cue(w, CUE_MISS)
+        for w in correct or []:
+            self.cue(w, STATE_SUCCESS)
+        return {
+            "remaining": self._session.remaining_words(),
+            "complete": self._session.page_complete,
+        }
 
     def add_stars(self, n: int) -> int:
         """Add ``n`` stars (never negative) and broadcast; return the new total."""
