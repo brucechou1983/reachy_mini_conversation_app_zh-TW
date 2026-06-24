@@ -19,27 +19,30 @@ Patterns captured after user corrections, so the same mistake isn't repeated.
   touching your own logic. Don't branch on SDK enums that the SDK may normalize —
   prefer `getattr(obj, "real_method", None)` capability checks.
 
-- **Fixing one thing exposes what it was masking — echo self-interrupt.** Once
-  the barge-in flush actually worked (`clear_player`), a new symptom appeared:
-  "no response" and the storyteller stopping mid-page. Cause: the robot has no
-  echo cancellation, so it hears its *own* voice; Gemini's server VAD fires a
-  spurious `interrupted` that — now that the flush is real — kills the robot's own
-  reply. Previously the no-op flush hid this. Two defenses, both default-on and
-  tunable: (a) an interrupt **grace** (`INTERRUPT_GRACE_MS`) ignoring interrupts
-  in the first moments of a reply (covers the tail of the user's own question);
-  (b) an **echo gate** — only honor an interrupt if the recent mic peak rose above
-  `BARGE_IN_LEVEL` (a real person speaks up; mere echo stays below). Measure the
-  robot's echo floor vs. real-speech level from logs (here echo <0.06< speech
-  ~0.085) to pick the threshold. Rule: after fixing a masking bug, expect latent
-  bugs it hid to surface, and re-test the whole interaction.
+- **Don't compensate for your own misconfiguration with more code — check the
+  working sibling.** After the flush fix, the robot started interrupting *itself*
+  ("no response", storyteller stalls mid-page). My first instinct was to bolt on
+  defenses (an interrupt grace + a mic-energy "echo gate"). The user asked the
+  right question: *gpt-realtime never self-interrupted — are we deviating from the
+  official method?* It was: the OpenAI handler uses **default** `server_vad`
+  (moderate threshold), while our Gemini config forced
+  `START_SENSITIVITY_HIGH` — which I'd added earlier to "help" barge-in fire, back
+  when barge-in was actually broken by the no-op flush. With the flush fixed, the
+  aggressive sensitivity was pure liability: it tripped on the robot's own echo.
+  The fix was to **delete** the override (use Gemini's default sensitivity, like
+  OpenAI) and drop the grace + echo-gate entirely. Rule: when one backend
+  misbehaves and a sibling backend doesn't, diff their config against the vendor
+  default *before* adding compensating machinery — a knob you set is the first
+  suspect, and matching the reference beats inventing a workaround. Keep only the
+  minimal, legitimate tuning (an explicit `silence_duration_ms`); don't ship
+  defenses for a problem you created.
 
-- **End-of-turn VAD must be patient for kids.** Gemini Live with
-  `END_SENSITIVITY_HIGH` cut a child's turn on the pause inside "等⋯一下",
-  answering "等" then asking what "一下" meant. Use `END_SENSITIVITY_LOW` + an
-  explicit `silence_duration_ms` (~900ms), keep start sensitivity HIGH so barge-in
-  stays instant. The SDK's `AutomaticActivityDetection` exposes
-  `silence_duration_ms`/`prefix_padding_ms` — prefer the explicit ms knobs over
-  the HIGH/LOW preset.
+- **End-of-turn VAD must be patient for kids — but tune timing, not sensitivity.**
+  Gemini Live's default end-of-turn timing cut a child's turn on the pause inside
+  "等⋯一下", answering "等" then asking what "一下" meant. Fix with an explicit
+  `silence_duration_ms` (~900ms) + `prefix_padding_ms` from
+  `AutomaticActivityDetection`; leave start/end sensitivity at the vendor default
+  (forcing it is what caused the self-interrupt above).
 
 - **Constrain tool enums in the schema, not just the description.** `play_emotion`
   listed valid names only in the param *description*, so the model emitted
