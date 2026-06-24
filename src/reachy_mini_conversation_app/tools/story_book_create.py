@@ -130,35 +130,17 @@ async def _generate_story(story_id: str, theme: str, num_pages: int, handler: An
         # Auto-open reader in browser
         webbrowser.open(f"http://localhost:7860/reader/books/{story_id}")
 
-        # Step 4: Notify the robot via conversation injection
-        if handler and getattr(handler, "connection", None):
+        # Step 4: book is ready — start reading it. Client-driven (the app fetches
+        # each page and asks the model to narrate it); works for BOTH backends via
+        # StoryReaderMixin.begin_story_autoread. Previously this was gated on the
+        # OpenAI-only ``connection`` attribute, so the Gemini backend finished the
+        # book but never started reading.
+        connected = getattr(handler, "connection", None) or getattr(handler, "session", None)
+        if handler and connected and hasattr(handler, "begin_story_autoread"):
             try:
-                # Wait for any in-progress response to finish before injecting
-                response_idle = getattr(handler, "response_idle", None)
-                if response_idle is not None:
-                    try:
-                        await asyncio.wait_for(response_idle.wait(), timeout=30.0)
-                    except asyncio.TimeoutError:
-                        logger.warning("Timed out waiting for response to finish; proceeding anyway")
-
-                await handler.connection.conversation.item.create(
-                    item={
-                        "type": "message",
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "input_text",
-                                "text": (
-                                    f"[系統通知: 故事書「{theme}」已經產生完成了！共有 {len(pages)} 頁。"
-                                    "請告訴小朋友故事好了，然後呼叫 story_book_go_to_page(page=1) 開始翻到第一頁朗讀故事。]"
-                                ),
-                            }
-                        ],
-                    },
-                )
-                await handler.connection.response.create()
+                await handler.begin_story_autoread(1)
             except Exception as e:
-                logger.warning("Failed to notify handler about story ready: %s", e)
+                logger.warning("Failed to start story auto-read: %s", e)
 
     except Exception as e:
         logger.exception("Story generation failed: %s", e)

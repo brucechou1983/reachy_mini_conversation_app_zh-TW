@@ -26,6 +26,7 @@ from scipy.signal import resample
 from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.prompts import get_session_instructions
 from reachy_mini_conversation_app.genai_client import make_genai_client
+from reachy_mini_conversation_app.story_autoread import StoryReaderMixin
 from reachy_mini_conversation_app.tools.core_tools import (
     ToolDependencies,
     get_tool_specs,
@@ -37,7 +38,7 @@ from reachy_mini_conversation_app.conversation_handler import ConversationHandle
 logger = logging.getLogger(__name__)
 
 
-class GeminiRealtimeHandler(ConversationHandler):
+class GeminiRealtimeHandler(StoryReaderMixin, ConversationHandler):
     """A Gemini Live API handler for fastrtc Stream / LocalStream."""
 
     def __init__(
@@ -79,6 +80,7 @@ class GeminiRealtimeHandler(ConversationHandler):
             self._barge_level = 0.06
         self._loud_frames = 0
         self._model_speech_start = 0.0
+        self._init_story_state()  # page-by-page auto-read loop (StoryReaderMixin)
         # After a client-side barge-in we flush the player, but Gemini keeps
         # streaming the rest of the aborted turn until ITS own VAD sends
         # `interrupted`. Drop those in-flight chunks until this deadline so the
@@ -217,9 +219,14 @@ class GeminiRealtimeHandler(ConversationHandler):
                 logger.error("Gemini session loop error: %s", e)
                 raise
 
+    async def _story_request_narration(self, instruction: str) -> None:
+        """Make Gemini read a page aloud: inject the page text as a user turn."""
+        await self.inject_user_text(instruction, respond=True)
+
     async def _handle_tool_call(self, tool_call: Any) -> None:
         """Dispatch Gemini function calls through the shared tool registry."""
         function_responses = []
+        story_page_result: dict[str, Any] | None = None
         for fc in tool_call.function_calls:
             tool_name = fc.name
             args_json = json.dumps(fc.args)
@@ -236,6 +243,13 @@ class GeminiRealtimeHandler(ConversationHandler):
             if tool_name == "camera" and "b64_im" in response_to_send:
                 camera_image_b64 = response_to_send.pop("b64_im")
                 response_to_send["image_captured"] = True
+
+            # Story page: don't let the model narrate from the bulky function
+            # response (it would compete with the narration we inject below).
+            # Acknowledge minimally; the auto-read loop drives the actual reading.
+            if tool_name == "story_book_go_to_page" and tool_result.get("status") == "ok":
+                story_page_result = tool_result
+                response_to_send = {"status": "ok", "page": tool_result.get("page")}
 
             function_responses.append(
                 self.types.FunctionResponse(name=fc.name, id=fc.id, response=response_to_send)
@@ -260,6 +274,12 @@ class GeminiRealtimeHandler(ConversationHandler):
                 self.is_idle_tool_call = False
             if self.deps.head_wobbler is not None:
                 self.deps.head_wobbler.reset()
+
+        # Model jumped to a page itself (e.g. child asked for page 5): drive the
+        # auto-read loop from there instead of relying on the model to narrate.
+        if story_page_result is not None:
+            self.cancel_story_advance()
+            await self.apply_story_page_result(story_page_result)
 
     async def _inject_camera_image(self, b64_image: str) -> None:
         """Send a captured camera image into the Live session as a video frame.
@@ -327,12 +347,14 @@ class GeminiRealtimeHandler(ConversationHandler):
                             self._model_speech_start = now
                             self._loud_frames = 0
                         self._model_speaking = True
+                        self.note_story_audio(audio_array.size)  # time auto-advance
                         await self.output_queue.put((self.output_sample_rate, audio_array))
 
         if getattr(server_content, "turn_complete", None):
             self._model_speaking = False
             self._logged_mic_while_speaking = False
             self._mute_until = 0.0  # turn done; let the next turn play
+            self.story_turn_finished()  # schedule the next page if we just narrated one
             self.deps.movement_manager.set_listening(False)
             if self.input_transcription_buffer.strip():
                 await self.output_queue.put(
@@ -392,6 +414,7 @@ class GeminiRealtimeHandler(ConversationHandler):
         self._model_speaking = False
         self._logged_mic_while_speaking = False
         self._loud_frames = 0
+        self.cancel_story_advance()  # a child interrupting stops the auto-read loop
         if suppress:
             self._mute_until = asyncio.get_event_loop().time() + self._BARGE_MUTE_WINDOW_S
         else:
