@@ -711,7 +711,11 @@ class LocalStream:
         logger.debug(f"Audio recording started at {input_sample_rate} Hz")
 
         while not self._stop_event.is_set():
-            audio_frame = self._robot.media.get_audio_sample()
+            # Read the mic OFF the event loop: get_audio_sample() can block, and
+            # if it (or playback) blocks the loop, the recorder stalls while the
+            # robot is speaking — so Gemini never hears a barge-in and can't be
+            # interrupted. Threading keeps record + play genuinely concurrent.
+            audio_frame = await asyncio.to_thread(self._robot.media.get_audio_sample)
             if audio_frame is not None:
                 await self.handler.receive((input_sample_rate, audio_frame))
             await asyncio.sleep(0)  # avoid busy loop
@@ -744,7 +748,9 @@ class LocalStream:
                     except Exception as e:  # never let slowdown break playback
                         logger.warning("speech slowdown failed; playing normally: %s", e)
                 if audio_frame is not None and audio_frame.size > 0:
-                    self._robot.media.push_audio_sample(audio_frame)
+                    # Push playback OFF the event loop so it can't block the
+                    # recorder (see record_loop) — keeps barge-in responsive.
+                    await asyncio.to_thread(self._robot.media.push_audio_sample, audio_frame)
 
             else:
                 logger.debug("Ignoring output type=%s", type(handler_output).__name__)
