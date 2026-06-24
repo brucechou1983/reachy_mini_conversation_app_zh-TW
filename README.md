@@ -93,6 +93,7 @@ launchctl setenv GOOGLE_GENAI_USE_VERTEXAI false
 launchctl setenv GEMINI_API_KEY <你的_AI_STUDIO_KEY>
 launchctl setenv GEMINI_LIVE_MODEL_NAME gemini-3.1-flash-live-preview
 launchctl setenv REACHY_MINI_CUSTOM_PROFILE english_learner   # 選填：啟用英文學習遊戲
+# 語速預設已放慢 1.5 倍；要調整或關閉：launchctl setenv SPEECH_SLOWDOWN 1.3（或 1.0 關閉、2.0 更慢）
 # 切回 Vertex 時改用：launchctl setenv GOOGLE_GENAI_USE_VERTEXAI true（並設好 GOOGLE_CLOUD_PROJECT）
 ```
 
@@ -207,6 +208,7 @@ pip install -e .[dev]
 | `LOCAL_VISION_MODEL` | 本機視覺處理的 Hugging Face 模型路徑（僅搭配 `--local-vision` 使用，預設為 `HuggingFaceTB/SmolVLM2-2.2B-Instruct`）。
 | `REACHY_MINI_CUSTOM_PROFILE` | 啟動時載入的 profile 名稱（`profiles/` 下的資料夾）。未設定時預設為 `default`。
 | `STORY_BOOKS_DIR` | 故事書的持久化儲存目錄。預設為 `~/.reachy_mini/books/`。
+| `SPEECH_SLOWDOWN` | 放慢汪汪語速給小朋友聽（保留音高的 WSOLA 時間延展）。**預設 `1.5`**（約 1.5 倍慢）；`1.0`=關閉、`1.3`=溫和、最高 `2.5`。範圍 `[1.0, 2.5]`。|
 
 ## 命令列選項
 

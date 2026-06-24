@@ -25,6 +25,7 @@ from scipy.signal import resample
 from reachy_mini import ReachyMini
 from reachy_mini.media.media_manager import MediaBackend
 from reachy_mini_conversation_app.config import config
+from reachy_mini_conversation_app.audio_pace import TimeStretcher, get_speech_slowdown
 from reachy_mini_conversation_app.story_routes import mount_story_routes
 from reachy_mini_conversation_app.conversation_handler import ConversationHandler
 from reachy_mini_conversation_app.headless_personality_ui import mount_personality_routes
@@ -98,6 +99,13 @@ class LocalStream:
         self._robot = robot
         self._stop_event = asyncio.Event()
         self._tasks: List[asyncio.Task[None]] = []
+        # Optional pitch-preserving speech slowdown for young children.
+        self._speech_factor = get_speech_slowdown()
+        self._stretcher: Optional[TimeStretcher] = (
+            TimeStretcher(self._speech_factor) if self._speech_factor > 1.0 else None
+        )
+        if self._stretcher is not None:
+            logger.info("Speech slowdown enabled: %.2gx (SPEECH_SLOWDOWN)", self._speech_factor)
         # Allow the handler to flush the player queue when appropriate.
         self.handler._clear_queue = self.clear_audio_queue
         self._settings_app: Optional[FastAPI] = settings_app
@@ -681,6 +689,9 @@ class LocalStream:
     def clear_audio_queue(self) -> None:
         """Flush the player's appsrc to drop any queued audio immediately."""
         logger.info("User intervention: flushing player queue")
+        # Drop any half-stretched audio so the next response starts clean.
+        if self._stretcher is not None:
+            self._stretcher.reset()
         # SDK >=1.8 renamed the backend enum: the GStreamer backends flush the
         # pipeline via clear_player(); every other audio backend (LOCAL /
         # SOUNDDEVICE / WEBRTC) uses clear_output_buffer().
@@ -727,7 +738,12 @@ class LocalStream:
                 audio_frame = _prepare_output_audio(
                     audio_data, input_sample_rate, output_sample_rate
                 )
-                if audio_frame is not None:
+                if audio_frame is not None and self._stretcher is not None:
+                    try:
+                        audio_frame = self._stretcher.process(audio_frame)
+                    except Exception as e:  # never let slowdown break playback
+                        logger.warning("speech slowdown failed; playing normally: %s", e)
+                if audio_frame is not None and audio_frame.size > 0:
                     self._robot.media.push_audio_sample(audio_frame)
 
             else:
