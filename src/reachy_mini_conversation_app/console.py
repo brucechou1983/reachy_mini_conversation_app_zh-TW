@@ -23,7 +23,6 @@ from numpy.typing import NDArray
 from scipy.signal import resample
 
 from reachy_mini import ReachyMini
-from reachy_mini.media.media_manager import MediaBackend
 from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.audio_pace import TimeStretcher, get_speech_slowdown
 from reachy_mini_conversation_app.story_routes import mount_story_routes
@@ -692,17 +691,28 @@ class LocalStream:
         # Drop any half-stretched audio so the next response starts clean.
         if self._stretcher is not None:
             self._stretcher.reset()
-        # SDK >=1.8 renamed the backend enum: the GStreamer backends flush the
-        # pipeline via clear_player(); every other audio backend (LOCAL /
-        # SOUNDDEVICE / WEBRTC) uses clear_output_buffer().
-        if self._robot.media.backend in (
-            MediaBackend.GSTREAMER,
-            MediaBackend.GSTREAMER_NO_VIDEO,
-        ):
-            # Directly flush gstreamer audio pipe
-            self._robot.media.audio.clear_player()
-        elif self._robot.media.audio is not None:
-            self._robot.media.audio.clear_output_buffer()
+        # Actually flush the backend's playback buffer. On every current SDK
+        # backend (LOCAL GStreamer *and* WEBRTC) ``clear_player()`` is the ONLY
+        # method that drops queued/in-flight audio — and on WEBRTC it also tells
+        # the daemon to flush the robot's speaker queue, where the bulk of the
+        # buffered audio actually sits. ``clear_output_buffer()`` is deprecated
+        # and a *no-op* on both backends.
+        #
+        # Do NOT gate on ``media.backend``: the SDK resolves the legacy
+        # GSTREAMER / GSTREAMER_NO_VIDEO enums to LOCAL, so the old
+        # ``backend in (GSTREAMER, …)`` check was always False and we silently
+        # called the no-op — leaving the robot talking straight through barge-in.
+        audio = self._robot.media.audio
+        if audio is not None:
+            flush = getattr(audio, "clear_player", None)
+            if callable(flush):
+                flush()
+            else:
+                # Pre-1.8 SDK had no clear_player(); there clear_output_buffer()
+                # was the real flush, so fall back to it.
+                legacy = getattr(audio, "clear_output_buffer", None)
+                if callable(legacy):
+                    legacy()
         self.handler.output_queue = asyncio.Queue()
 
     async def record_loop(self) -> None:

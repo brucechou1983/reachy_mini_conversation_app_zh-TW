@@ -1,10 +1,14 @@
-"""Regression tests for LocalStream.clear_audio_queue (barge-in) on SDK 1.8.
+"""Regression tests for LocalStream.clear_audio_queue (barge-in).
 
-Verifies the correct flush method is called per backend without a real robot.
-Note: in SDK 1.8 ``MediaBackend.DEFAULT``/``DEFAULT_NO_VIDEO`` are *aliases*
-(for LOCAL / GSTREAMER_NO_VIDEO), so the old code did not crash; the change
-branches on the canonical members so every backend (incl. GSTREAMER_NO_VIDEO,
-WEBRTC, SOUNDDEVICE_*) flushes correctly.
+These pin the fix for the bug where barge-in never actually silenced the robot:
+``clear_output_buffer()`` is *deprecated and a no-op* on every current SDK audio
+backend, while ``clear_player()`` is the real flush (and on WEBRTC also tells the
+daemon to drop the speaker queue). The old code gated on ``media.backend ==
+GSTREAMER*`` — enums the SDK resolves to LOCAL — so the check was always False and
+we silently called the no-op, leaving the robot talking through barge-in.
+
+So: every real backend MUST call ``clear_player()``; ``clear_output_buffer()`` is
+only a fallback for ancient SDKs that lack ``clear_player()`` entirely.
 """
 
 from unittest.mock import MagicMock
@@ -22,38 +26,42 @@ def _stream(backend, *, audio=...) -> LocalStream:
     return LocalStream(MagicMock(), robot)
 
 
-def test_gstreamer_uses_clear_player():
-    stream = _stream(MediaBackend.GSTREAMER)
+@pytest.mark.parametrize(
+    "backend",
+    [
+        MediaBackend.LOCAL,
+        MediaBackend.WEBRTC,
+        MediaBackend.GSTREAMER,
+        MediaBackend.GSTREAMER_NO_VIDEO,
+        MediaBackend.SOUNDDEVICE_OPENCV,
+    ],
+)
+def test_every_backend_uses_clear_player(backend):
+    # Regardless of backend, the real flush (clear_player) must be called and the
+    # deprecated no-op (clear_output_buffer) must NOT be.
+    stream = _stream(backend)
     stream.clear_audio_queue()
     stream._robot.media.audio.clear_player.assert_called_once()
     stream._robot.media.audio.clear_output_buffer.assert_not_called()
 
 
-def test_gstreamer_no_video_uses_clear_player():
-    stream = _stream(MediaBackend.GSTREAMER_NO_VIDEO)
+def test_falls_back_to_clear_output_buffer_when_no_clear_player():
+    # Ancient SDK without clear_player(): we must fall back to the (then-real)
+    # clear_output_buffer() rather than do nothing.
+    audio = MagicMock(spec=["clear_output_buffer"])
+    stream = _stream(MediaBackend.LOCAL, audio=audio)
     stream.clear_audio_queue()
-    stream._robot.media.audio.clear_player.assert_called_once()
+    audio.clear_output_buffer.assert_called_once()
 
 
-@pytest.mark.parametrize(
-    "backend",
-    [MediaBackend.LOCAL, MediaBackend.SOUNDDEVICE_OPENCV, MediaBackend.WEBRTC],
-)
-def test_non_gstreamer_uses_clear_output_buffer(backend):
-    stream = _stream(backend)
+def test_resets_stretcher_on_flush():
+    stream = _stream(MediaBackend.LOCAL)
+    stream._stretcher = MagicMock()
     stream.clear_audio_queue()
-    stream._robot.media.audio.clear_output_buffer.assert_called_once()
-    stream._robot.media.audio.clear_player.assert_not_called()
+    stream._stretcher.reset.assert_called_once()
 
 
 def test_none_audio_does_not_crash():
     stream = _stream(MediaBackend.LOCAL, audio=None)
     # must not raise even though there is no audio backend
     stream.clear_audio_queue()
-
-
-def test_default_aliases_resolve_to_canonical_members():
-    # Documents the SDK 1.8 reality: DEFAULT/DEFAULT_NO_VIDEO are aliases, and
-    # our barge-in branches on the canonical members they alias.
-    assert MediaBackend.DEFAULT is MediaBackend.LOCAL
-    assert MediaBackend.DEFAULT_NO_VIDEO is MediaBackend.GSTREAMER_NO_VIDEO

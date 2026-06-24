@@ -79,6 +79,11 @@ class GeminiRealtimeHandler(ConversationHandler):
             self._barge_level = 0.06
         self._loud_frames = 0
         self._model_speech_start = 0.0
+        # After a client-side barge-in we flush the player, but Gemini keeps
+        # streaming the rest of the aborted turn until ITS own VAD sends
+        # `interrupted`. Drop those in-flight chunks until this deadline so the
+        # robot stays quiet instead of resuming a beat later. 0.0 = not muted.
+        self._mute_until = 0.0
 
     def copy(self) -> "GeminiRealtimeHandler":
         """Create a fresh handler instance for a new session."""
@@ -269,7 +274,8 @@ class GeminiRealtimeHandler(ConversationHandler):
             # 'interrupted' decision (which can be slow or never arrive).
             if self._model_speaking and not self.input_transcription_buffer:
                 logger.info("Barge-in (heard child): stopping playback")
-                self._barge_in()
+                # Server may still be streaming this turn; mute until it stops.
+                self._barge_in(suppress=True)
             self.input_transcription_buffer += transcription.text
 
         transcription = getattr(server_content, "output_transcription", None)
@@ -277,11 +283,16 @@ class GeminiRealtimeHandler(ConversationHandler):
             self.output_transcription_buffer += transcription.text
 
         if getattr(server_content, "model_turn", None):
+            # While muted (just after a barge-in), drop the aborted turn's audio
+            # so the robot doesn't resume talking until the server catches up.
+            suppressed = asyncio.get_event_loop().time() < self._mute_until
             for part in server_content.model_turn.parts:
                 inline_data = getattr(part, "inline_data", None)
                 if inline_data is not None:
                     mime_type = getattr(inline_data, "mime_type", None)
                     if mime_type and mime_type.startswith("audio/pcm"):
+                        if suppressed:
+                            continue
                         audio_bytes = inline_data.data
                         audio_array = np.frombuffer(audio_bytes, dtype=np.int16).reshape(1, -1)
                         if self.deps.head_wobbler is not None:
@@ -297,6 +308,7 @@ class GeminiRealtimeHandler(ConversationHandler):
         if getattr(server_content, "turn_complete", None):
             self._model_speaking = False
             self._logged_mic_while_speaking = False
+            self._mute_until = 0.0  # turn done; let the next turn play
             self.deps.movement_manager.set_listening(False)
             if self.input_transcription_buffer.strip():
                 await self.output_queue.put(
@@ -311,6 +323,8 @@ class GeminiRealtimeHandler(ConversationHandler):
 
         if getattr(server_content, "interrupted", None):
             logger.info("Barge-in (server interrupted): stopping playback")
+            # The server has stopped this turn itself, so anything it sends next
+            # is the new turn — don't suppress it (clears any client mute window).
             self._barge_in()
             self.input_transcription_buffer = ""
             self.output_transcription_buffer = ""
@@ -318,6 +332,9 @@ class GeminiRealtimeHandler(ConversationHandler):
     # Local barge-in tuning.
     _BARGE_GRACE_S = 0.4   # ignore the first moments of the robot's turn
     _BARGE_SUSTAIN = 3     # consecutive loud mic frames required
+    # After a client-side barge-in, mute incoming audio for this long to bridge
+    # the gap until the server stops the aborted turn (sends `interrupted`).
+    _BARGE_MUTE_WINDOW_S = 1.0
 
     @staticmethod
     def _frame_level(audio_frame: NDArray[Any]) -> float:
@@ -336,13 +353,26 @@ class GeminiRealtimeHandler(ConversationHandler):
         self._loud_frames = self._loud_frames + 1 if level >= self._barge_level else 0
         if self._loud_frames >= self._BARGE_SUSTAIN:
             logger.info("Local barge-in: sustained speech (level=%.3f) — stopping playback", level)
-            self._barge_in()
+            # Gemini keeps streaming this turn until its own VAD fires; mute it.
+            self._barge_in(suppress=True)
 
-    def _barge_in(self) -> None:
-        """Stop the robot talking immediately: drop queued audio + flush player."""
+    def _barge_in(self, suppress: bool = False) -> None:
+        """Stop the robot talking immediately: drop queued audio + flush player.
+
+        ``suppress=True`` (client-side barge-in: heard-child / local mic energy)
+        also mutes incoming audio for ``_BARGE_MUTE_WINDOW_S`` so the rest of the
+        aborted turn — which Gemini keeps streaming until its own VAD sends
+        ``interrupted`` — doesn't resume playback right after the flush. For a
+        server ``interrupted`` (``suppress=False``) the server has already
+        stopped the turn, so we clear the mute and let the next turn play.
+        """
         self._model_speaking = False
         self._logged_mic_while_speaking = False
         self._loud_frames = 0
+        if suppress:
+            self._mute_until = asyncio.get_event_loop().time() + self._BARGE_MUTE_WINDOW_S
+        else:
+            self._mute_until = 0.0
         # Drop audio we've already queued, then flush the player buffer so the
         # robot goes quiet at once instead of finishing its turn.
         self._drain_output_queue()
