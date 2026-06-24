@@ -101,3 +101,12 @@ def test_get_speech_slowdown_parses_and_clamps(monkeypatch):
     assert get_speech_slowdown() == 1.0  # never speed up
     monkeypatch.setattr(config, "SPEECH_SLOWDOWN", "garbage", raising=False)
     assert get_speech_slowdown() == 1.0  # invalid -> no change
+
+
+def test_stretch_handles_2d_mono_without_crashing():
+    """Gemini emits (N, 1) audio; the stretcher must accept it and keep the shape."""
+    st = TimeStretcher(1.5)
+    x = _sine(48000, 24000).reshape(-1, 1)
+    out = st.process(x)
+    assert out.ndim == 2 and out.shape[1] == 1
+    assert abs(len(out) / len(x) - 1.5) < 0.06
