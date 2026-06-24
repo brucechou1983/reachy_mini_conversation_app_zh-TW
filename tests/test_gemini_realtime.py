@@ -280,6 +280,89 @@ async def test_model_turn_marks_speaking():
     assert h._model_speaking is True
 
 
+def _audio_model_turn():
+    """A model_turn server_content carrying one PCM audio chunk."""
+    import numpy as np
+
+    inline = type("_I", (), {"mime_type": "audio/pcm", "data": np.zeros(160, dtype=np.int16).tobytes()})()
+    part = type("_P", (), {"inline_data": inline})()
+    return _server_content(model_turn=type("_MT", (), {"parts": [part]})())
+
+
+@pytest.mark.asyncio
+async def test_suppress_window_drops_aborted_turn_audio():
+    """While muted (just after a client barge-in), incoming chunks are dropped.
+
+    Regression: BARGE_IN_LOCAL flushed the player but Gemini kept streaming the
+    aborted turn, whose chunks resumed playback a beat later. They must be muted.
+    """
+    h = GeminiRealtimeHandler(MagicMock())
+    h._mute_until = asyncio.get_event_loop().time() + 5.0  # inside the mute window
+
+    await h._handle_server_content(_audio_model_turn())
+
+    assert h.output_queue.empty()       # chunk dropped, not queued for playback
+    assert h._model_speaking is False   # and we did NOT re-arm "speaking"
+
+
+@pytest.mark.asyncio
+async def test_audio_plays_again_once_mute_window_lapses():
+    h = GeminiRealtimeHandler(MagicMock())
+    h._mute_until = 0.0  # not muted
+
+    await h._handle_server_content(_audio_model_turn())
+
+    assert not h.output_queue.empty()
+    assert h._model_speaking is True
+
+
+@pytest.mark.asyncio
+async def test_heard_child_barge_in_arms_mute_window():
+    """A client-side (heard-child) barge-in must mute until the server catches up."""
+    h = GeminiRealtimeHandler(MagicMock())
+    h._model_speaking = True
+    h._clear_queue = lambda: None
+
+    sc = _server_content(input_transcription=type("_T", (), {"text": "停"})())
+    await h._handle_server_content(sc)
+
+    assert h._mute_until > asyncio.get_event_loop().time()
+
+
+@pytest.mark.asyncio
+async def test_server_interrupted_clears_mute_window():
+    """A server 'interrupted' means the turn already stopped — let the next play."""
+    h = GeminiRealtimeHandler(MagicMock())
+    h._clear_queue = lambda: None
+    h._mute_until = asyncio.get_event_loop().time() + 5.0  # a prior client mute
+
+    await h._handle_server_content(_server_content(interrupted=True))
+
+    assert h._mute_until == 0.0
+
+
+@pytest.mark.asyncio
+async def test_turn_complete_clears_mute_window():
+    h = GeminiRealtimeHandler(MagicMock())
+    h._mute_until = asyncio.get_event_loop().time() + 5.0
+
+    await h._handle_server_content(_server_content(turn_complete=True))
+
+    assert h._mute_until == 0.0
+
+
+@pytest.mark.asyncio
+async def test_local_barge_in_arms_mute_but_server_interrupt_does_not():
+    h = GeminiRealtimeHandler(MagicMock())
+    h._clear_queue = lambda: None
+
+    h._barge_in(suppress=True)
+    assert h._mute_until > asyncio.get_event_loop().time()
+
+    h._barge_in()  # server-style: no suppression
+    assert h._mute_until == 0.0
+
+
 def test_live_config_uses_configured_voice():
     """Voice comes from config.GEMINI_VOICE (default Leda)."""
     from reachy_mini_conversation_app.config import config
