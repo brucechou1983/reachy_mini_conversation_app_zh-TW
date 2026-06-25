@@ -61,19 +61,46 @@ _load_env_files()
 
 
 def _macos_has_display() -> bool:
-    """Return True if macOS reports an online (present) display (fail-safe: True on error)."""
+    """Return True if a *physical* monitor is attached on macOS (fail-safe: True on error).
+
+    Counting "online" displays alone isn't enough: a headless Mac (e.g. a Mac mini with
+    no HDMI) and a Screen-Sharing session both expose a *virtual/phantom* framebuffer
+    that shows up as an online display. We additionally require a non-zero EDID physical
+    size (``CGDisplayScreenSize`` in mm) — a real monitor reports its size, a phantom /
+    virtual display reports 0×0 — so a screenless Mac mini is correctly detected as
+    "no screen". A real monitor still reports its size while asleep/mirrored/clamshell,
+    so this keeps working for those cases too. If anything goes wrong, assume a screen
+    is present (never disable features on a misdetect) — override with
+    ``REACHY_MINI_HAS_SCREEN``.
+    """
     import ctypes
 
     try:
         cg = ctypes.CDLL("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
+
+        class _CGSize(ctypes.Structure):
+            _fields_ = [("width", ctypes.c_double), ("height", ctypes.c_double)]
+
+        cg.CGGetOnlineDisplayList.argtypes = [
+            ctypes.c_uint32,
+            ctypes.POINTER(ctypes.c_uint32),
+            ctypes.POINTER(ctypes.c_uint32),
+        ]
+        cg.CGGetOnlineDisplayList.restype = ctypes.c_int32
+        cg.CGDisplayScreenSize.argtypes = [ctypes.c_uint32]
+        cg.CGDisplayScreenSize.restype = _CGSize
+
+        max_displays = 16
+        ids = (ctypes.c_uint32 * max_displays)()
         count = ctypes.c_uint32(0)
-        # CGGetOnlineDisplayList counts displays that are physically PRESENT, even if
-        # momentarily not drawable (asleep / mirrored / clamshell) — unlike the
-        # "active" list, which would false-negative on a working-but-asleep Mac.
-        err = cg.CGGetOnlineDisplayList(0, None, ctypes.byref(count))
+        err = cg.CGGetOnlineDisplayList(max_displays, ids, ctypes.byref(count))
         if err != 0:
-            return True
-        return count.value > 0
+            return True  # fail-safe
+        for i in range(count.value):
+            size = cg.CGDisplayScreenSize(ids[i])
+            if size.width > 0 and size.height > 0:
+                return True  # a real monitor with EDID dimensions
+        return False  # only phantom/virtual framebuffers (or none) → no real screen
     except Exception:
         return True  # never disable screen features just because detection failed
 
@@ -88,7 +115,8 @@ def detect_screen() -> bool:
     1. Explicit override ``REACHY_MINI_HAS_SCREEN`` (true/false) — authoritative; set
        it in ``~/.reachy_mini/.env`` when auto-detection is wrong for your setup.
     2. Linux: ``$DISPLAY`` / ``$WAYLAND_DISPLAY`` present.
-    3. macOS: CoreGraphics online-display count > 0.
+    3. macOS: a physical monitor with a real EDID size is attached (so a headless
+       Mac mini's phantom/virtual display doesn't count as a screen).
     4. Anything else / detection error: assume a screen is present (fail-safe, so we
        never wrongly disable features on a machine that actually has a display).
     """
