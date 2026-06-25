@@ -256,14 +256,19 @@ Patterns captured after user corrections, so the same mistake isn't repeated.
   dispatcher, before any state-mutating gate — not only where it's advertised. This is
   the same "enforce in code, not in the prompt" principle as the activity gate.
 
-- **For "is there a display," detect physical presence, not drawability.** macOS
-  ``CGGetActiveDisplayList`` counts only currently-drawable displays, so a clamshell /
-  asleep / mirrored Mac that genuinely has a screen reports 0 and would wrongly disable
-  features on a working setup. ``CGGetOnlineDisplayList`` counts displays that are
-  physically present even when momentarily not drawable — the right semantic for "a
-  screen is attached." Keep detection fail-safe (errors/unknown platform → assume a
-  screen) and provide an explicit override env var, since auto-detection can't be right
-  everywhere.
+- **"Is a monitor attached" on macOS needs the EDID physical size, not a display
+  count.** First cut used ``CGGetActiveDisplayList`` (drawable only) → false-negative on
+  a clamshell/asleep Mac. Switching to ``CGGetOnlineDisplayList`` fixed that but
+  introduced a false-*positive*: a headless Mac mini (no HDMI) and a Screen-Sharing
+  session both expose a *phantom/virtual* framebuffer that counts as an online display,
+  so the robot thinks it has a screen when nobody can see one. The signal that actually
+  distinguishes a real monitor is its EDID: iterate the online displays and require
+  ``CGDisplayScreenSize`` (physical mm) > 0 — a real monitor reports its size (even while
+  asleep, since EDID is cached at connect), a phantom/virtual display reports 0×0. Keep
+  it fail-safe (errors → assume a screen) and provide an explicit override
+  (``REACHY_MINI_HAS_SCREEN``), because a real monitor behind an EDID-stripping adapter
+  would otherwise false-negative. (ctypes note: set ``restype`` to a 2-double Structure
+  for ``CGDisplayScreenSize``'s by-value return.)
 
 ## LLM-driven interactions
 

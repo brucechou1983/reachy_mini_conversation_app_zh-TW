@@ -47,6 +47,53 @@ def test_macos_helper_failsafe_on_error(monkeypatch):
     assert cfg._macos_has_display() is True
 
 
+def test_macos_no_online_displays_means_no_screen(monkeypatch):
+    """Headless Mac mini: no online display (count stays 0) → no screen."""
+    import ctypes
+    from unittest.mock import MagicMock
+
+    cg = MagicMock()
+    cg.CGGetOnlineDisplayList.return_value = 0   # err=0; count left at 0 (no displays)
+    monkeypatch.setattr(ctypes, "CDLL", lambda *a, **k: cg)
+    assert cfg._macos_has_display() is False
+
+
+def test_macos_phantom_display_zero_size_means_no_screen(monkeypatch):
+    """A phantom/virtual framebuffer (0x0 EDID size) is not a real screen."""
+    import ctypes
+    from unittest.mock import MagicMock
+
+    cg = MagicMock()
+
+    def _online(maxd, ids, count_ref):
+        ids[0] = 1
+        count_ref._obj.value = 1     # one online display
+        return 0
+
+    cg.CGGetOnlineDisplayList.side_effect = _online
+    cg.CGDisplayScreenSize.return_value = MagicMock(width=0.0, height=0.0)   # phantom
+    monkeypatch.setattr(ctypes, "CDLL", lambda *a, **k: cg)
+    assert cfg._macos_has_display() is False
+
+
+def test_macos_real_monitor_nonzero_size_means_screen(monkeypatch):
+    """A real monitor reports non-zero EDID size → screen present."""
+    import ctypes
+    from unittest.mock import MagicMock
+
+    cg = MagicMock()
+
+    def _online(maxd, ids, count_ref):
+        ids[0] = 1
+        count_ref._obj.value = 1
+        return 0
+
+    cg.CGGetOnlineDisplayList.side_effect = _online
+    cg.CGDisplayScreenSize.return_value = MagicMock(width=602.0, height=339.0)
+    monkeypatch.setattr(ctypes, "CDLL", lambda *a, **k: cg)
+    assert cfg._macos_has_display() is True
+
+
 # --- tool gating: requires_screen tools hidden when no screen ---
 
 
