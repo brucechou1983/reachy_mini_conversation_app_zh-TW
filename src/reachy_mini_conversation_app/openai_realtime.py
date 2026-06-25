@@ -16,7 +16,7 @@ from numpy.typing import NDArray
 from scipy.signal import resample
 from websockets.exceptions import ConnectionClosedOK, ConnectionClosedError
 
-from reachy_mini_conversation_app.config import config
+from reachy_mini_conversation_app.config import config, reachy_mini_home
 from reachy_mini_conversation_app.prompts import get_session_voice, get_session_instructions
 from reachy_mini_conversation_app.story_autoread import StoryReaderMixin
 from reachy_mini_conversation_app.tools.core_tools import (
@@ -28,6 +28,34 @@ from reachy_mini_conversation_app.conversation_handler import ConversationHandle
 
 
 logger = logging.getLogger(__name__)
+
+
+def _is_auth_error(e: BaseException) -> bool:
+    """Return True if an exception indicates a rejected/invalid OpenAI API key.
+
+    Covers both failure modes: an in-band close during ``session.update``
+    (``ConnectionClosedError`` whose string carries ``invalid_api_key`` — the
+    observed case), and a handshake-time rejection at ``connect()`` (websockets
+    ``InvalidStatus`` with HTTP 401/403, or an openai ``AuthenticationError``).
+    """
+    s = str(e)
+    if "invalid_api_key" in s or "invalid_request_error" in s:
+        return True
+    status = getattr(getattr(e, "response", None), "status_code", None)
+    if status in (401, 403):
+        return True
+    return type(e).__name__ in ("AuthenticationError", "PermissionDeniedError")
+
+
+def _log_auth_error() -> None:
+    """Log a loud, actionable message instead of failing silently on a bad key."""
+    logger.error(
+        "❌ OpenAI Realtime rejected the API key (invalid/expired); the robot cannot "
+        "start a conversation. Fix it and restart the app: set OPENAI_API_KEY on the "
+        "settings page http://localhost:7860/ , or put it in %s/.env . If you meant to "
+        "use Gemini, set HANDLER_TYPE=gemini (and GEMINI_API_KEY) instead.",
+        reachy_mini_home(),
+    )
 
 OPEN_AI_INPUT_SAMPLE_RATE: Final[Literal[24000]] = 24000
 OPEN_AI_OUTPUT_SAMPLE_RATE: Final[Literal[24000]] = 24000
@@ -222,6 +250,11 @@ class OpenaiRealtimeHandler(StoryReaderMixin, ConversationHandler):
                 # Normal exit from the session, stop retrying
                 return
             except (ConnectionClosedError, ConnectionClosedOK) as e:
+                # A rejected key can also surface here (vs. inside session.update);
+                # retrying a bad key is pointless, so report it and stop.
+                if _is_auth_error(e):
+                    _log_auth_error()
+                    return
                 # Connection closed (restart or network issue) → retry
                 logger.warning("Realtime websocket closed (attempt %d/%d): %s", attempt, max_attempts, e)
                 if attempt < max_attempts:
@@ -232,6 +265,14 @@ class OpenaiRealtimeHandler(StoryReaderMixin, ConversationHandler):
                     logger.info("Retrying in %.1f seconds...", delay)
                     await asyncio.sleep(delay)
                     continue
+                raise
+            except Exception as e:
+                # A handshake-time rejection (websockets InvalidStatus HTTP 401/403,
+                # or an openai AuthenticationError) surfaces here, not as a
+                # ConnectionClosed. Report a bad key loudly and stop; re-raise the rest.
+                if _is_auth_error(e):
+                    _log_auth_error()
+                    return
                 raise
             finally:
                 # never keep a stale reference
@@ -341,8 +382,13 @@ class OpenaiRealtimeHandler(StoryReaderMixin, ConversationHandler):
                 # If we reached here, the session update succeeded which implies the API key worked.
                 # Persist the key to a newly created .env (copied from .env.example) if needed.
                 self._persist_api_key_if_needed()
-            except Exception:
-                logger.exception("Realtime session.update failed; aborting startup")
+            except Exception as e:
+                # Don't fail silently: an invalid/missing key is the #1 reason the
+                # robot "won't talk", and the cause is invisible without this hint.
+                if _is_auth_error(e):
+                    _log_auth_error()
+                else:
+                    logger.exception("Realtime session.update failed; aborting startup")
                 return
 
             logger.info("Realtime session updated successfully")

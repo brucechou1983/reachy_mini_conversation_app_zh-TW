@@ -227,6 +227,22 @@ Patterns captured after user corrections, so the same mistake isn't repeated.
   close actually succeeded (gate-refused calls return ``{"error":...}``), or the robot
   says "the story's over" in the middle of the other activity.
 
+## Configuration / deployment
+
+- **`launchctl setenv` does not survive a reboot — give config a durable on-disk
+  home.** "Latest version broke conversation" turned out to be: the user set
+  `HANDLER_TYPE=gemini` / `REACHY_MINI_CUSTOM_PROFILE` / `GEMINI_API_KEY` via
+  `launchctl setenv`, a reboot cleared the launchd session env, so the app fell back
+  to the OpenAI backend + `default` profile and aborted on an invalid OpenAI key.
+  The app log (not the daemon log) showed the smoking gun: `No .env file found`,
+  `Conversation backend: OpenAI Realtime`, `... invalid_request_error.invalid_api_key`.
+  Two fixes: (1) load a durable fallback `~/.reachy_mini/.env` (override=False, so it
+  fills gaps without clobbering explicit env) — survives reboots *and* reinstalls;
+  (2) never fail silently on a rejected key — log a loud, actionable message pointing
+  to the settings page / the durable file. Diagnostic rule: when a Reachy Mini app
+  "won't talk," read the **App** log, not the **Daemon** log — the daemon polls look
+  healthy while the real Python traceback is in the app log.
+
 ## LLM-driven interactions
 
 - **Enforce hard rules in code, not in the prompt.** First cut of the read-along

@@ -1,20 +1,62 @@
 import os
 import logging
+from pathlib import Path
 
 from dotenv import find_dotenv, load_dotenv
 
 
 logger = logging.getLogger(__name__)
 
-# Locate .env file (search upward from current working directory)
-dotenv_path = find_dotenv(usecwd=True)
 
-if dotenv_path:
-    # Load .env and override environment variables
-    load_dotenv(dotenv_path=dotenv_path, override=True)
-    logger.info(f"Configuration loaded from {dotenv_path}")
-else:
-    logger.warning("No .env file found, using environment variables")
+def reachy_mini_home() -> Path:
+    """Return the durable per-user config/data dir (``~/.reachy_mini``).
+
+    Deliberately NOT configurable via an env var: an env var could itself be wiped
+    on reboot (the very failure this guards against), and other durable state
+    (book library, read-along progress) already lives under ``~/.reachy_mini``.
+    """
+    return Path.home() / ".reachy_mini"
+
+
+def _load_env_files() -> None:
+    """Load configuration from ``.env`` files into the process environment.
+
+    Precedence, highest first:
+
+    1. **Project-local** ``.env`` searched upward from the working directory —
+       a developer override (``override=True``, as this app has always done).
+    2. **OS environment** (e.g. ``launchctl setenv`` / shell exports) — kept as-is.
+    3. **Durable** ``~/.reachy_mini/.env`` — a per-user *fallback* (``override=False``)
+       that only fills in vars not already set. It survives reboots *and* app
+       reinstalls, so settings like
+       ``HANDLER_TYPE`` / ``REACHY_MINI_CUSTOM_PROFILE`` / ``GEMINI_API_KEY`` don't
+       vanish when a launchd/login-session env is cleared on reboot (the usual cause
+       of "the robot suddenly won't talk after a reboot"). It never overrides an
+       explicit env var, so it's safe to keep alongside launchctl exports.
+    """
+    loaded: list[str] = []
+
+    # Durable fallback first (override=False so explicit OS env / CWD .env win).
+    durable = reachy_mini_home() / ".env"
+    if durable.is_file():
+        load_dotenv(dotenv_path=str(durable), override=False)
+        loaded.append(f"{durable} (fallback)")
+
+    cwd_env = find_dotenv(usecwd=True)
+    if cwd_env:
+        load_dotenv(dotenv_path=cwd_env, override=True)
+        loaded.append(cwd_env)
+
+    if loaded:
+        logger.info("Configuration loaded from: %s", ", ".join(loaded))
+    else:
+        logger.warning(
+            "No .env file found (checked %s and the working directory); "
+            "using OS environment variables only", durable,
+        )
+
+
+_load_env_files()
 
 
 class Config:
