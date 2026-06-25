@@ -23,6 +23,7 @@ class ReadAlongFinish(Tool):
     """Finish the read-along session and reward the child with stars."""
 
     name = "read_along_finish"
+    requires_screen = True  # needs the on-screen reader
     description = (
         "結束繪本帶讀，在閱讀器上顯示星星獎勵畫面。"
         "讀完整本書、做完情緒對話後呼叫。stars 是給小朋友的星星數（1-5）。"

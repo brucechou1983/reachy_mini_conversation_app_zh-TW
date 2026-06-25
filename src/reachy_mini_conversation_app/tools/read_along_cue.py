@@ -20,6 +20,7 @@ class ReadAlongCue(Tool):
     """Highlight / animate a word on the current read-along page."""
 
     name = "read_along_cue"
+    requires_screen = True  # needs the on-screen reader
     description = (
         "在繪本閱讀器上標記一個英文單字。"
         "state=miss（小朋友卡住，系統自動跳動→highlight→拆音）、"

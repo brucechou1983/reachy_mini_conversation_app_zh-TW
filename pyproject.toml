@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "reachy_mini_conversation_app_zh_tw"
-version = "0.4.18"
+version = "0.4.19"
 authors = [{ name = "Bruce Chou" }]
 description = "Reachy Mini 台灣中文對話程式（兒童版）"
 readme = "README.md"

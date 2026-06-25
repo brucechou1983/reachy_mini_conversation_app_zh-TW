@@ -61,6 +61,7 @@ class StoryBookCreate(Tool):
     """Asynchronously create a multi-page illustrated story book."""
 
     name = "story_book_create"
+    requires_screen = True  # needs the on-screen reader
     description = (
         "開始非同步產生一本多頁插畫故事書。呼叫後立即返回，故事會在背景產生。"
         "當故事準備好時會自動通知你。"

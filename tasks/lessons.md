@@ -243,6 +243,28 @@ Patterns captured after user corrections, so the same mistake isn't repeated.
   "won't talk," read the **App** log, not the **Daemon** log — the daemon polls look
   healthy while the real Python traceback is in the app log.
 
+## Capability gating
+
+- **Hiding a tool from the LLM's spec list is not the same as disabling it — gate at
+  the execution boundary too.** When adding "no screen → disable the picture-book
+  tools," filtering ``get_tool_specs()`` correctly removed them from what the model is
+  offered, but ``dispatch_tool_call`` looks up the *unfiltered* instance map, so a
+  hallucinated/echoed tool name or a browser-injected nudge could still execute a
+  "disabled" tool (and a disabled *entry* tool even mutated shared activity state on
+  its way to erroring). Rule: any capability gate (no-screen, missing key, wrong
+  activity) must be enforced where the tool actually runs — a check at the top of the
+  dispatcher, before any state-mutating gate — not only where it's advertised. This is
+  the same "enforce in code, not in the prompt" principle as the activity gate.
+
+- **For "is there a display," detect physical presence, not drawability.** macOS
+  ``CGGetActiveDisplayList`` counts only currently-drawable displays, so a clamshell /
+  asleep / mirrored Mac that genuinely has a screen reports 0 and would wrongly disable
+  features on a working setup. ``CGGetOnlineDisplayList`` counts displays that are
+  physically present even when momentarily not drawable — the right semantic for "a
+  screen is attached." Keep detection fail-safe (errors/unknown platform → assume a
+  screen) and provide an explicit override env var, since auto-detection can't be right
+  everywhere.
+
 ## LLM-driven interactions
 
 - **Enforce hard rules in code, not in the prompt.** First cut of the read-along

@@ -15,6 +15,7 @@ class StoryBookClose(Tool):
     """Close the story reader UI."""
 
     name = "story_book_close"
+    requires_screen = True  # needs the on-screen reader
     description = "關閉故事書閱讀器。故事說完後呼叫此工具。"
     parameters_schema = {
         "type": "object",

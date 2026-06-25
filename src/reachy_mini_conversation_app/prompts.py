@@ -61,6 +61,29 @@ def _expand_prompt_includes(content: str) -> str:
     return '\n'.join(expanded_lines)
 
 
+def _screen_mode_note() -> str:
+    """Note appended when no screen is available — only for profiles with screen tools.
+
+    Skipped entirely when a screen is present, or when the active profile has no
+    screen-dependent tools (so we never inject children's-book wording into an
+    unrelated persona).
+    """
+    if config.SCREEN_AVAILABLE:
+        return ""
+    # Lazy import to avoid a circular import at module load.
+    from reachy_mini_conversation_app.tools.core_tools import _ALL_TOOL_INSTANCES
+
+    if not any(getattr(t, "requires_screen", False) for t in _ALL_TOOL_INSTANCES.values()):
+        return ""
+    return (
+        "## 目前沒有螢幕\n"
+        "這台汪汪現在沒有接螢幕，需要看畫面的功能（做故事書、故事書架、英文繪本帶讀）都暫停了，"
+        "相關工具也不會出現。請專心用「不用螢幕」的方式陪小朋友：聊天、口頭說故事、唱歌、數數、"
+        "猜謎、玩問答等等。不要說要做故事書或開繪本給他看，也不要主動問他要「聽故事還是讀英文」，"
+        "更不要嘗試呼叫那些需要螢幕的工具。"
+    )
+
+
 def get_session_instructions(
     memory_store: Any | None = None,
     profile_memory_store: Any | None = None,
@@ -103,6 +126,11 @@ def get_session_instructions(
                 skill_catalog = format_catalog(skill_entries)
                 if skill_catalog:
                     expanded_instructions = expanded_instructions + "\n\n" + skill_catalog
+
+                # When there is no screen, tell the model the visual features are off.
+                screen_note = _screen_mode_note()
+                if screen_note:
+                    expanded_instructions = expanded_instructions + "\n\n" + screen_note
 
                 return expanded_instructions
             logger.error(f"Profile '{profile}' has empty {INSTRUCTIONS_FILENAME}")

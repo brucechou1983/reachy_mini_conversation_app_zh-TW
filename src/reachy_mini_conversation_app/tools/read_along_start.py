@@ -73,6 +73,7 @@ class ReadAlongStart(Tool):
     """List curated SEL books, or open one and start the read-along."""
 
     name = "read_along_start"
+    requires_screen = True  # needs the on-screen reader
     description = (
         "開始『跟著汪汪讀英文繪本』(Ello 式帶讀，小朋友自己讀、你陪讀引導)。"
         "不帶 book_id 時，列出可選的英文情緒繪本讓小朋友挑。"

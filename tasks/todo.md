@@ -1,43 +1,26 @@
-# Task: hotfix — 重開機後對話壞掉（launchctl env 被清）
+# Task: 書架文案（聽 vs 讀）+ 無螢幕時停用視覺功能
 
-## 病因（app log 直接證實）
-使用者用 `launchctl setenv` 設 HANDLER_TYPE=gemini / REACHY_MINI_CUSTOM_PROFILE / GEMINI_API_KEY。
-重開機 → launchd session env 清空 → app 跌回 OpenAI + default profile + 無效 OpenAI 金鑰 →
-`session.update` 被拒（invalid_api_key）→ 靜默 aborting startup → 連對話都起不來。
-（log: `No .env file found` / `Conversation backend: OpenAI Realtime` / `invalid_request_error.invalid_api_key`）
-→ 與 v0.4.17 / #44 完全無關。
+## A. 文案：聽故事 vs 自己讀
+- 故事書架 reader.html → 標題「聽故事 / Listen to a story」+ 標語「汪汪唸給你聽」（reader.css 加 .shelf-sub/.shelf-tagline）。
+- 英文書架 read_along_shelf.html → 「我自己讀英文 / I read it myself」+「你自己讀、汪汪在旁邊陪你」。
+- english_learner instructions → 兩活動明標【聽故事】vs【自己讀】；汪汪先問「你想聽汪汪說故事，還是自己讀英文？」。
 
-## 修法（使用者選 b）
-- **耐久 .env**：config.py 新增 `_load_env_files()`，多讀一份 `~/.reachy_mini/.env`
-  （或 `$REACHY_MINI_HOME/.env`）當 fallback（override=False，不蓋掉明確 env）。
-  優先序：CWD .env > OS env(launchctl) > 耐久 .env。重開機/重裝都不會被清。
-- **不要再靜默壞掉**：openai_realtime 在 invalid_api_key 時改印明確可行動訊息
-  （指向設定頁 http://localhost:7860/ ＋ `~/.reachy_mini/.env` ＋ 提示 HANDLER_TYPE=gemini），
-  不再只是 generic exception 後默默 return。
-- 文件：.env.example 頂部說明放置位置；lessons.md 記錄。
+## B. 無螢幕偵測 → 停用視覺功能、順聊天
+- config.detect_screen()：override REACHY_MINI_HAS_SCREEN > Linux $DISPLAY/$WAYLAND > macOS CoreGraphics(Online) > 預設 True（fail-safe）。啟動時算一次 → config.SCREEN_AVAILABLE。
+- core_tools：Tool.requires_screen（10 個故事/帶讀工具設 True）；_tool_enabled 在註冊、get_tool_specs、**dispatch_tool_call** 三處 gate。無螢幕 → 視覺工具消失、聊天工具保留。
+- prompts：無螢幕時附註告知模型視覺功能停用（且只在該 profile 真的有視覺工具時才附）。
 
-## To-do
-- [x] config.py _load_env_files + reachy_mini_home（fallback override=False、硬編 ~/.reachy_mini）
-- [x] openai_realtime invalid_api_key 明確報錯（in-band ＋ handshake 401 都涵蓋）
-- [x] tests：config 優先序 + _is_auth_error 偵測
-- [x] .env.example + lessons.md
-- [x] ruff + mypy + 全套 pytest（380 passed）+ 端到端 smoke
-- [x] 對抗式審查（11 agents）→ 處理
-- [x] 版本 bump + uv lock + commit + PR + CI + HF sync（進行中）
+## 對抗式審查（13 agents）→ 已修
+- **[HIGH] dispatch 沒 gate disabled 工具**：specs 雖隱藏，但 dispatch_tool_call 用 _ALL_TOOL_INSTANCES，幻覺/回音/路由注入仍可執行（甚至翻動 activity state）→ 在 dispatch 開頭加 _tool_enabled 守門（gate 之前），擋下並回 error，不動 state。
+- **[HIGH] 無螢幕附註注入每個 profile**：非童書 persona 也被塞童書文字 → 改成只有「該 profile 真的有 requires_screen 工具」時才附。
+- **[MED] CGGetActiveDisplayList（可繪製）→ 改 CGGetOnlineDisplayList（實際接上）**：避免 clamshell/休眠誤判成沒螢幕、停掉有螢幕機器的功能。
+- **[LOW] 指示軟矛盾**：強化附註「也不要問聽還是讀」。
+- (subjective) 啟動算一次不重評 → 正是「啟動時偵測」的需求，保留。
+
+## 驗證
+- 本機（有螢幕）Online 偵測 True（不誤關）；REACHY_MINI_HAS_SCREEN=false → 10 個視覺工具從 specs 消失、聊天工具留、dispatch 也擋下、附註出現。
+- 391 passed、ruff + mypy 全綠。
 
 ## Review
-對抗式審查抓到兩點，已修：
-- **[HIGH] 報錯分支其實不會觸發**：真正的 auth 失敗可能在 WS handshake（`InvalidStatus` HTTP 401，
-  字串不含 invalid_api_key），落在 try 之外。改用 `_is_auth_error()`（涵蓋 in-band 的
-  invalid_api_key 字串＝使用者實際案例、handshake 401/403、openai AuthenticationError），
-  並在 session.update except 與 start_up（ConnectionClosed 分支＋新增 generic except）都接住 → 才真的「不再靜默」。
-- **[LOW] REACHY_MINI_HOME split-brain**：那個 env var 只搬 .env、不搬 books/progress，且 env var
-  本身也會被重開機清掉（自相矛盾）→ 移除，硬編 `~/.reachy_mini`。
-
-最終：耐久 fallback `~/.reachy_mini/.env`（override=False，不蓋明確 env）＋ 金鑰無效時明確可行動報錯。
-380 passed、ruff/mypy 全綠。
-
-## 使用者要做的
-重開機後先 `launchctl setenv ...` 重設、重啟 app（眼前復原）；
-之後建一份 `~/.reachy_mini/.env` 放 HANDLER_TYPE=gemini / REACHY_MINI_CUSTOM_PROFILE=english_learner /
-GEMINI_API_KEY，就一勞永逸（不再被重開機清掉，也不用 launchctl）。
+完成。實機：無螢幕的汪汪啟動後應只聊天、不提故事書/繪本；有螢幕則照舊，且書架標題清楚分「聽 vs 讀」。
+可用 REACHY_MINI_HAS_SCREEN=true/false 覆寫偵測（建議寫進 ~/.reachy_mini/.env）。

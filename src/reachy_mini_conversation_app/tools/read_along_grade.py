@@ -34,6 +34,7 @@ class ReadAlongGrade(Tool):
     """Mark which words the child read correctly vs. misread, in one call."""
 
     name = "read_along_grade"
+    requires_screen = True  # needs the on-screen reader
     description = (
         "小朋友讀完一整頁後，一次回報哪些英文字讀對(correct)、哪些讀錯或漏掉(incorrect)。"
         "仔細聽每一個字：只要有字沒讀對或漏掉，就要放進 incorrect，不要全部當成讀對。"

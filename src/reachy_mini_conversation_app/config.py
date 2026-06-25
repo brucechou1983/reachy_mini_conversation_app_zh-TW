@@ -1,4 +1,5 @@
 import os
+import sys
 import logging
 from pathlib import Path
 
@@ -57,6 +58,57 @@ def _load_env_files() -> None:
 
 
 _load_env_files()
+
+
+def _macos_has_display() -> bool:
+    """Return True if macOS reports an online (present) display (fail-safe: True on error)."""
+    import ctypes
+
+    try:
+        cg = ctypes.CDLL("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
+        count = ctypes.c_uint32(0)
+        # CGGetOnlineDisplayList counts displays that are physically PRESENT, even if
+        # momentarily not drawable (asleep / mirrored / clamshell) — unlike the
+        # "active" list, which would false-negative on a working-but-asleep Mac.
+        err = cg.CGGetOnlineDisplayList(0, None, ctypes.byref(count))
+        if err != 0:
+            return True
+        return count.value > 0
+    except Exception:
+        return True  # never disable screen features just because detection failed
+
+
+def detect_screen() -> bool:
+    """Detect whether a display is available for the picture-book reader UI.
+
+    The story bookshelf and read-along readers open a browser window — useless on a
+    screenless robot — so we detect at startup and disable those features when there
+    is no screen (the robot then just chats). Resolution order:
+
+    1. Explicit override ``REACHY_MINI_HAS_SCREEN`` (true/false) — authoritative; set
+       it in ``~/.reachy_mini/.env`` when auto-detection is wrong for your setup.
+    2. Linux: ``$DISPLAY`` / ``$WAYLAND_DISPLAY`` present.
+    3. macOS: CoreGraphics online-display count > 0.
+    4. Anything else / detection error: assume a screen is present (fail-safe, so we
+       never wrongly disable features on a machine that actually has a display).
+    """
+    override = (os.environ.get("REACHY_MINI_HAS_SCREEN") or "").strip().lower()
+    if override:
+        result = override in ("1", "true", "yes", "on")
+        source = "REACHY_MINI_HAS_SCREEN override"
+    elif sys.platform == "darwin":
+        result, source = _macos_has_display(), "macOS CoreGraphics"
+    elif sys.platform.startswith("linux"):
+        result = bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+        source = "$DISPLAY/$WAYLAND_DISPLAY"
+    else:
+        result, source = True, "default"
+    logger.info(
+        "Screen detected: %s (via %s). Picture-book/read-along features are %s. "
+        "Override with REACHY_MINI_HAS_SCREEN=true/false.",
+        result, source, "ENABLED" if result else "DISABLED",
+    )
+    return result
 
 
 class Config:
@@ -122,6 +174,10 @@ class Config:
 
     # Gemini features (storyteller, memory consolidation) work via an AI Studio key OR Vertex AI.
     GEMINI_AVAILABLE = bool(GEMINI_API_KEY) or GOOGLE_GENAI_USE_VERTEXAI
+
+    # Whether a display is available for the on-screen reader (detected at startup).
+    # When False, the picture-book / read-along tools are disabled and the robot chats.
+    SCREEN_AVAILABLE = detect_screen()
 
     logger.debug(f"Model: {MODEL_NAME}, HF_HOME: {HF_HOME}, Vision Model: {LOCAL_VISION_MODEL}")
 
