@@ -188,3 +188,43 @@ async def test_inject_user_text_respond_false_skips_response() -> None:
         assert captured["response"] is False
     finally:
         asyncio.set_event_loop(None)
+
+
+# --- invalid-key detection (never fail silently on a bad key) ---
+
+
+def test_is_auth_error_detects_invalid_key_in_band_close():
+    # The observed case: a ConnectionClosedError carrying the server reason string.
+    assert rt_mod._is_auth_error(
+        Exception("received 3000 (registered) invalid_request_error.invalid_api_key")
+    )
+    assert rt_mod._is_auth_error(Exception("invalid_request_error"))
+
+
+def test_is_auth_error_detects_handshake_401():
+    class _Resp:
+        status_code = 401
+
+    class _InvalidStatus(Exception):
+        response = _Resp()
+
+    assert rt_mod._is_auth_error(_InvalidStatus("server rejected WebSocket connection: HTTP 401"))
+
+
+def test_is_auth_error_detects_openai_auth_type():
+    class AuthenticationError(Exception):
+        pass
+
+    assert rt_mod._is_auth_error(AuthenticationError("bad key"))
+
+
+def test_is_auth_error_false_for_non_auth():
+    assert not rt_mod._is_auth_error(Exception("connection reset by peer"))
+
+    class _Resp:
+        status_code = 500
+
+    class _ServerErr(Exception):
+        response = _Resp()
+
+    assert not rt_mod._is_auth_error(_ServerErr("internal error"))
