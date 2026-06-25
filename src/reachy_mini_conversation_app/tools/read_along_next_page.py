@@ -19,6 +19,7 @@ class ReadAlongNextPage(Tool):
     """Advance the read-along to the next page."""
 
     name = "read_along_next_page"
+    requires_screen = True  # needs the on-screen reader
     description = (
         "小朋友讀完這一頁後，翻到繪本的下一頁並顯示。"
         "回傳下一頁的英文字讓你邀請小朋友繼續讀。"

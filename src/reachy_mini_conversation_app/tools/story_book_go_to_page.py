@@ -15,6 +15,7 @@ class StoryBookGoToPage(Tool):
     """Navigate to a story page and trigger reading."""
 
     name = "story_book_go_to_page"
+    requires_screen = True  # needs the on-screen reader
     description = (
         "翻到故事書的指定頁面，在閱讀器上顯示，並朗讀該頁內容。"
         "第一次呼叫時用 page=1 開始，之後遞增。"

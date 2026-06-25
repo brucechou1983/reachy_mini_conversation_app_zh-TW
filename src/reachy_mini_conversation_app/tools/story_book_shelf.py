@@ -29,6 +29,7 @@ class StoryBookShelf(Tool):
     """Open the visual story bookshelf for the child to choose a saved book."""
 
     name = "story_book_shelf"
+    requires_screen = True  # needs the on-screen reader
     description = (
         "打開螢幕上的故事書架，顯示所有之前做好的故事書，讓小朋友可以用看的挑選想讀哪一本。"
         "這個工具只會打開書架頁面，不會載入故事；小朋友在螢幕上點封面，系統會自動通知你去開那本書，"

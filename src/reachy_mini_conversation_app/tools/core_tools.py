@@ -74,6 +74,9 @@ class Tool(abc.ABC):
     name: str
     description: str
     parameters_schema: Dict[str, Any]
+    # Tools whose UX needs the on-screen reader (story bookshelf / read-along) set
+    # this True; they are hidden when no display is detected (config.SCREEN_AVAILABLE).
+    requires_screen: bool = False
 
     def spec(self) -> Dict[str, Any]:
         """Return the function spec for LLM consumption."""
@@ -199,16 +202,25 @@ def _initialize_tools() -> None:
     _load_profile_tools()
 
     _ALL_TOOL_INSTANCES = {cls.name: cls() for cls in get_concrete_subclasses(Tool)}  # type: ignore[type-abstract]
-    ALL_TOOLS = {name: t for name, t in _ALL_TOOL_INSTANCES.items() if t.is_available()}
+    ALL_TOOLS = {name: t for name, t in _ALL_TOOL_INSTANCES.items() if _tool_enabled(t)}
     ALL_TOOL_SPECS = [tool.spec() for tool in ALL_TOOLS.values()]
 
     for name, t in _ALL_TOOL_INSTANCES.items():
-        if t.is_available():
+        if _tool_enabled(t):
             logger.info(f"tool registered: {name} - {t.description}")
+        elif t.requires_screen and not config.SCREEN_AVAILABLE:
+            logger.info(f"tool skipped (no screen): {name}")
         else:
             logger.info(f"tool skipped (unavailable): {name}")
 
     _TOOLS_INITIALIZED = True
+
+
+def _tool_enabled(t: "Tool") -> bool:
+    """Return True if a tool is available AND (a screen exists OR it needs none)."""
+    if t.requires_screen and not config.SCREEN_AVAILABLE:
+        return False
+    return t.is_available()
 
 
 _initialize_tools()
@@ -217,14 +229,14 @@ _initialize_tools()
 def get_tool_specs(exclusion_list: list[str] = []) -> list[Dict[str, Any]]:
     """Get tool specs, dynamically checking availability.
 
-    Tools whose ``is_available()`` returns ``False`` at call time are excluded,
-    allowing runtime configuration (e.g. setting an API key) to enable tools
-    without restarting the process.
+    Tools whose ``is_available()`` returns ``False`` at call time (or that need a
+    screen when none is present) are excluded, allowing runtime configuration (e.g.
+    setting an API key) to enable tools without restarting the process.
     """
     return [
         t.spec()
         for t in _ALL_TOOL_INSTANCES.values()
-        if t.is_available() and t.name not in exclusion_list
+        if _tool_enabled(t) and t.name not in exclusion_list
     ]
 
 
@@ -244,6 +256,14 @@ async def dispatch_tool_call(tool_name: str, args_json: str, deps: ToolDependenc
 
     if not tool:
         return {"error": f"unknown tool: {tool_name}"}
+
+    # Code-level backstop for disabled tools (e.g. no screen / missing config): the
+    # model shouldn't see them, but a hallucinated/echoed call or a browser-injected
+    # nudge could still name one. Refuse BEFORE the activity gate, so a disabled entry
+    # tool can't mutate activity state on its way to erroring.
+    if not _tool_enabled(tool):
+        logger.info("tool refused (disabled/unavailable): %s", tool_name)
+        return {"error": f"tool unavailable: {tool_name}"}
 
     # Enforce the current-activity separation (storybook vs read-along): entry tools
     # switch activity (closing the other); within tools are refused when their

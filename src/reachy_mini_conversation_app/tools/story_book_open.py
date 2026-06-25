@@ -18,6 +18,7 @@ class StoryBookOpen(Tool):
     """Load a persisted book from the library and open the reader."""
 
     name = "story_book_open"
+    requires_screen = True  # needs the on-screen reader
     description = (
         "從書架上載入一本已儲存的故事書並開始朗讀。"
         "如果不知道 book_id，呼叫此工具不帶參數來列出書架上的書。"

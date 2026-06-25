@@ -116,8 +116,13 @@ def test_module_constants_distinct():
 
 
 class _FakeTool:
+    requires_screen = False
+
     def __init__(self):
         self.calls = 0
+
+    def is_available(self):
+        return True
 
     async def __call__(self, deps, **kwargs):
         self.calls += 1
