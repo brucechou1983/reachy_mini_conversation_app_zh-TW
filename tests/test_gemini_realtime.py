@@ -461,6 +461,77 @@ async def test_server_interrupt_without_transcript_keeps_story(monkeypatch):
     assert h._story_audio_samples == 50
 
 
+@pytest.mark.asyncio
+async def test_handle_tool_call_always_sends_tool_response(monkeypatch):
+    """Regression: every function call MUST get a tool response.
+
+    Gemini Live keeps the model's turn open until it receives the tool response.
+    We used to SKIP it for idle-triggered calls (e.g. an autonomous dance while the
+    child was quiet), which left the turn dangling forever — and because the child
+    is idle, nothing arrives to unstick it, so the robot freezes mid-speech.
+    """
+    h = GeminiRealtimeHandler(MagicMock())
+
+    async def fake_dispatch(name, args, deps):
+        return {"status": "queued", "move": "groovy_sway_and_roll"}
+
+    monkeypatch.setattr(gm, "dispatch_tool_call", fake_dispatch)
+
+    from google.genai import types as genai_types
+
+    sent = {"n": 0, "responses": None}
+
+    class FakeSession:
+        async def send_tool_response(self, function_responses=None):
+            sent["n"] += 1
+            sent["responses"] = function_responses
+
+    h.session = FakeSession()
+    h.types = genai_types
+
+    fc = type("_FC", (), {"name": "dance", "args": {"move": "groovy_sway_and_roll"}, "id": "call_1"})()
+    tool_call = type("_TC", (), {"function_calls": [fc]})()
+
+    await h._handle_tool_call(tool_call)
+
+    assert sent["n"] == 1                  # tool response sent (the freeze bug skipped it)
+    assert sent["responses"] is not None
+    assert len(sent["responses"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_send_idle_signal_does_not_suppress_tool_response(monkeypatch):
+    """The idle nudge must not put the handler into a state that skips tool
+    responses (that combination is exactly what froze the robot)."""
+    h = GeminiRealtimeHandler(MagicMock())
+
+    async def fake_dispatch(name, args, deps):
+        return {"status": "queued"}
+
+    monkeypatch.setattr(gm, "dispatch_tool_call", fake_dispatch)
+
+    from google.genai import types as genai_types
+
+    sent = {"n": 0}
+
+    class FakeSession:
+        async def send(self, input=None, end_of_turn=None):
+            pass
+
+        async def send_tool_response(self, function_responses=None):
+            sent["n"] += 1
+
+    h.session = FakeSession()
+    h.types = genai_types
+
+    await h.send_idle_signal(20.0)   # simulate the idle nudge that triggered the dance
+
+    fc = type("_FC", (), {"name": "dance", "args": {}, "id": "c1"})()
+    await h._handle_tool_call(type("_TC", (), {"function_calls": [fc]})())
+
+    assert sent["n"] == 1            # still answered, even right after an idle nudge
+
+
 def test_live_config_uses_configured_voice():
     """Voice comes from config.GEMINI_VOICE (default Leda)."""
     from reachy_mini_conversation_app.config import config

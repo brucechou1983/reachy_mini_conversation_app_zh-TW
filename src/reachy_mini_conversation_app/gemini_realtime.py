@@ -64,7 +64,6 @@ class GeminiRealtimeHandler(StoryReaderMixin, ConversationHandler):
 
         self.last_activity_time = asyncio.get_event_loop().time()
         self.start_time = asyncio.get_event_loop().time()
-        self.is_idle_tool_call = False
         self._shutdown_requested = False
 
         self.input_transcription_buffer = ""
@@ -272,10 +271,14 @@ class GeminiRealtimeHandler(StoryReaderMixin, ConversationHandler):
                 await self._show_camera_image_in_ui()
 
         if function_responses:
-            if not self.is_idle_tool_call:
-                await self.session.send_tool_response(function_responses=function_responses)
-            else:
-                self.is_idle_tool_call = False
+            # ALWAYS reply to function calls. Gemini Live keeps the model's turn
+            # open until it receives the tool response, so skipping it (we used to
+            # skip for idle-triggered calls) hangs the session mid-turn — and since
+            # the child is idle, no further input ever arrives to unstick it, so the
+            # robot freezes mid-speech. (The OpenAI handler always sends the
+            # function_call_output too; it only suppresses the *follow-up verbal*
+            # response for idle calls, which Gemini Live has no separate step for.)
+            await self.session.send_tool_response(function_responses=function_responses)
             if self.deps.head_wobbler is not None:
                 self.deps.head_wobbler.reset()
 
@@ -531,7 +534,6 @@ class GeminiRealtimeHandler(StoryReaderMixin, ConversationHandler):
         """Nudge Gemini to do something autonomous after a period of silence."""
         if not self.session:
             return
-        self.is_idle_tool_call = True
         msg = (
             f"[Idle time update: {self.format_timestamp()} - "
             f"No activity for {idle_duration:.1f}s] "
