@@ -1,26 +1,37 @@
-# Task: 書架文案（聽 vs 讀）+ 無螢幕時停用視覺功能
+# Task: Durable camera low-light fix (auto-exposure-priority=1 at startup)
 
-## A. 文案：聽故事 vs 自己讀
-- 故事書架 reader.html → 標題「聽故事 / Listen to a story」+ 標語「汪汪唸給你聽」（reader.css 加 .shelf-sub/.shelf-tagline）。
-- 英文書架 read_along_shelf.html → 「我自己讀英文 / I read it myself」+「你自己讀、汪汪在旁邊陪你」。
-- english_learner instructions → 兩活動明標【聽故事】vs【自己讀】；汪汪先問「你想聽汪汪說故事，還是自己讀英文？」。
+## Why
+Lite camera is dark in dim light. Root cause (verified live on the robot's cam,
+vid 0x38FB:pid 0x1002): UVC `auto-exposure-priority=0` pins exposure at the 1/60s
+(16.6ms) ceiling, so auto-exposure can't lengthen the shutter and just maxes gain.
+Official HF docs ("Image is dark on the Lite version") fix = set
+`auto-exposure-priority=1` via uvc-util (macOS) / v4l2-ctl (Linux). There is NO
+SDK/daemon exposure API and no selectable low-fps mode, so this OS-level UVC
+control is the supported lever. uvc-util writes are honored even while the daemon
+streams — but reset on restart/replug, hence apply at every startup.
 
-## B. 無螢幕偵測 → 停用視覺功能、順聊天
-- config.detect_screen()：override REACHY_MINI_HAS_SCREEN > Linux $DISPLAY/$WAYLAND > macOS CoreGraphics(Online) > 預設 True（fail-safe）。啟動時算一次 → config.SCREEN_AVAILABLE。
-- core_tools：Tool.requires_screen（10 個故事/帶讀工具設 True）；_tool_enabled 在註冊、get_tool_specs、**dispatch_tool_call** 三處 gate。無螢幕 → 視覺工具消失、聊天工具保留。
-- prompts：無螢幕時附註告知模型視覺功能停用（且只在該 profile 真的有視覺工具時才附）。
-
-## 對抗式審查（13 agents）→ 已修
-- **[HIGH] dispatch 沒 gate disabled 工具**：specs 雖隱藏，但 dispatch_tool_call 用 _ALL_TOOL_INSTANCES，幻覺/回音/路由注入仍可執行（甚至翻動 activity state）→ 在 dispatch 開頭加 _tool_enabled 守門（gate 之前），擋下並回 error，不動 state。
-- **[HIGH] 無螢幕附註注入每個 profile**：非童書 persona 也被塞童書文字 → 改成只有「該 profile 真的有 requires_screen 工具」時才附。
-- **[MED] CGGetActiveDisplayList（可繪製）→ 改 CGGetOnlineDisplayList（實際接上）**：避免 clamshell/休眠誤判成沒螢幕、停掉有螢幕機器的功能。
-- **[LOW] 指示軟矛盾**：強化附註「也不要問聽還是讀」。
-- (subjective) 啟動算一次不重評 → 正是「啟動時偵測」的需求，保留。
-
-## 驗證
-- 本機（有螢幕）Online 偵測 True（不誤關）；REACHY_MINI_HAS_SCREEN=false → 10 個視覺工具從 specs 消失、聊天工具留、dispatch 也擋下、附註出現。
-- 391 passed、ruff + mypy 全綠。
+## Plan
+- [ ] New module `camera_uvc.py`: extract `find_uvc_tool`, `device_selector`,
+      `get_controls`, `set_controls`, `_UVC_CONTROLS` from take_photo; add
+      `apply_low_light_defaults(camera_specs, *, enable)` (per-tool control names,
+      best-effort, never raises).
+- [ ] Refactor `take_photo.py` to import from `camera_uvc` (drop private copies),
+      behavior unchanged.
+- [ ] `config.py`: `CAMERA_LOW_LIGHT` (env `REACHY_MINI_CAMERA_LOW_LIGHT`, default on).
+- [ ] `utils.handle_vision_stuff`: after CameraWorker created, call
+      `apply_low_light_defaults(current_robot.media.camera.camera_specs, enable=...)`.
+- [ ] Tests `tests/test_camera_uvc.py`; keep `test_take_photo.py` green.
+- [ ] ruff + mypy + pytest green; version bump; ship PR.
 
 ## Review
-完成。實機：無螢幕的汪汪啟動後應只聊天、不提故事書/繪本；有螢幕則照舊，且書架標題清楚分「聽 vs 讀」。
-可用 REACHY_MINI_HAS_SCREEN=true/false 覆寫偵測（建議寫進 ~/.reachy_mini/.env）。
+- New `camera_uvc.py`: find_uvc_tool / device_selector / get_controls / set_controls
+  + apply_low_light_defaults (per-tool names; macOS uvc-util mode=8/priority=1,
+  Linux v4l2 exposure_auto=3/exposure_auto_priority=1). Best-effort, never raises.
+- take_photo.py now imports those (deleted its 4 private dup copies + _UVC_CONTROLS),
+  behavior unchanged; renamed local `device_selector` var -> `selector` (name clash).
+- config.CAMERA_LOW_LIGHT (env REACHY_MINI_CAMERA_LOW_LIGHT, default on).
+- utils.handle_vision_stuff applies the fix after CameraWorker is created, guarded.
+- .env.example documents the knob.
+- Tests: tests/test_camera_uvc.py (18). Full suite 412 passed, ruff + mypy green.
+- Verified live on the robot cam (0x38fb:0x1002): priority was 0, exposure railed at
+  16.6ms (1/60s); uvc-util writes honoured while daemon streams; left at auto+priority=1.

@@ -1,11 +1,8 @@
 """Tool to capture a photo from the robot's camera and save it as PNG."""
 
 import time
-import shutil
 import asyncio
 import logging
-import platform
-import subprocess
 from typing import Any, Dict, List, Optional, cast
 from pathlib import Path
 from datetime import datetime
@@ -14,112 +11,18 @@ import cv2
 import numpy as np
 from numpy.typing import NDArray
 
+from reachy_mini_conversation_app.camera_uvc import (
+    get_controls,
+    set_controls,
+    find_uvc_tool,
+    device_selector,
+)
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
 
 
 logger = logging.getLogger(__name__)
 
 PHOTOS_DIR = Path.home() / "Pictures" / "reachy"
-
-# UVC controls to save and restore across resolution switches.
-# Switching resolution on macOS resets all UVC device controls to defaults.
-_UVC_CONTROLS = [
-    "auto-exposure-mode",
-    "auto-exposure-priority",
-    "exposure-time-abs",
-    "brightness",
-    "gain",
-    "contrast",
-    "saturation",
-    "sharpness",
-    "gamma",
-    "hue",
-    "white-balance-temp",
-    "auto-white-balance-temp",
-    "backlight-compensation",
-    "power-line-frequency",
-]
-
-
-# ------------------------------------------------------------------
-# UVC helpers (macOS: uvc-util, Linux: v4l2-ctl)
-# ------------------------------------------------------------------
-
-def _find_uvc_tool() -> Optional[str]:
-    """Return the path to the platform's UVC CLI tool, or None."""
-    if platform.system() == "Darwin":
-        # shutil.which may fail in sandboxed app environments where
-        # /usr/local/bin is not on PATH.  Check common paths explicitly.
-        path = shutil.which("uvc-util")
-        if path:
-            return path
-        for candidate in ["/usr/local/bin/uvc-util", "/opt/homebrew/bin/uvc-util"]:
-            if Path(candidate).is_file():
-                return candidate
-        return None
-    elif platform.system() == "Linux":
-        return shutil.which("v4l2-ctl")
-    return None
-
-
-def _uvc_get_all(tool: str, device_selector: List[str]) -> Dict[str, str]:
-    """Read current values for all UVC controls we care about."""
-    saved: Dict[str, str] = {}
-    for ctrl in _UVC_CONTROLS:
-        try:
-            if "uvc-util" in tool:
-                result = subprocess.run(
-                    [tool] + device_selector + ["--get-value", ctrl],
-                    capture_output=True, text=True, timeout=5,
-                )
-            else:
-                # v4l2-ctl on Linux
-                result = subprocess.run(
-                    [tool] + device_selector + [f"--get-ctrl={ctrl}"],
-                    capture_output=True, text=True, timeout=5,
-                )
-            if result.returncode == 0 and result.stdout.strip():
-                val = result.stdout.strip().split(":")[-1].strip()
-                saved[ctrl] = val
-        except Exception:
-            pass
-    return saved
-
-
-def _uvc_set_all(
-    tool: str,
-    device_selector: List[str],
-    values: Dict[str, str],
-) -> None:
-    """Restore saved UVC control values."""
-    for ctrl, val in values.items():
-        try:
-            if "uvc-util" in tool:
-                subprocess.run(
-                    [tool] + device_selector + [f"--set={ctrl}={val}"],
-                    capture_output=True, text=True, timeout=5,
-                )
-            else:
-                subprocess.run(
-                    [tool] + device_selector + [f"--set-ctrl={ctrl}={val}"],
-                    capture_output=True, text=True, timeout=5,
-                )
-        except Exception:
-            pass
-
-
-def _get_device_selector(tool: str, camera: Any) -> List[str]:
-    """Build the device-selector flags for uvc-util or v4l2-ctl."""
-    if "uvc-util" in tool:
-        specs = getattr(camera, "camera_specs", None)
-        if specs is not None:
-            vid = getattr(specs, "vid", 0)
-            pid = getattr(specs, "pid", 0)
-            if vid and pid:
-                return [f"--select-by-vendor-and-product-id={vid:#06x}:{pid:#06x}"]
-        return ["-I", "0"]
-    # v4l2-ctl: default device
-    return []
 
 
 class TakePhoto(Tool):
@@ -245,13 +148,13 @@ class TakePhoto(Tool):
                 return None
 
             # Locate UVC CLI tool.
-            uvc_tool = _find_uvc_tool()
-            device_selector: List[str] = []
+            uvc_tool = find_uvc_tool()
+            selector: List[str] = []
             saved_controls: Dict[str, str] = {}
 
             if uvc_tool:
-                device_selector = _get_device_selector(uvc_tool, camera)
-                saved_controls = _uvc_get_all(uvc_tool, device_selector)
+                selector = device_selector(uvc_tool, getattr(camera, "camera_specs", None))
+                saved_controls = get_controls(uvc_tool, selector)
                 logger.info("Saved UVC controls via %s: %s", uvc_tool, saved_controls)
             else:
                 logger.info("No UVC tool found; will use software brightness correction")
@@ -273,7 +176,7 @@ class TakePhoto(Tool):
             # to enable auto-exposure with priority=1 so the sensor converges
             # to correct brightness.  We then drain warmup frames for AEC.
             if uvc_tool:
-                _uvc_set_all(uvc_tool, device_selector, {
+                set_controls(uvc_tool, selector, {
                     "auto-exposure-mode": "8",       # auto
                     "auto-exposure-priority": "1",   # prioritise exposure
                 })
@@ -317,7 +220,7 @@ class TakePhoto(Tool):
 
                     # Restore UVC controls again after switching back.
                     if uvc_tool and saved_controls:
-                        _uvc_set_all(uvc_tool, device_selector, saved_controls)
+                        set_controls(uvc_tool, selector, saved_controls)
 
                     logger.info(
                         "Camera resolution restored to %dx%d",

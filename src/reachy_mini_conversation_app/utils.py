@@ -59,6 +59,27 @@ def handle_vision_stuff(args: argparse.Namespace, current_robot: ReachyMini) -> 
         # Initialize camera worker
         camera_worker = CameraWorker(current_robot, head_tracker)
 
+        # Brighten the camera in dim light: tell the UVC camera it may lengthen
+        # exposure (drop framerate) instead of staying dark. Best-effort; resets
+        # on daemon restart, so we re-apply at every startup. See camera_uvc.
+        # Fire-and-forget on a daemon thread: nothing depends on the result, and a
+        # misbehaving USB camera must never delay (or block) app startup.
+        try:
+            import threading
+
+            from reachy_mini_conversation_app.config import config
+            from reachy_mini_conversation_app.camera_uvc import apply_low_light_defaults
+
+            camera = getattr(current_robot.media, "camera", None)
+            threading.Thread(
+                target=apply_low_light_defaults,
+                args=(getattr(camera, "camera_specs", None),),
+                kwargs={"enable": config.CAMERA_LOW_LIGHT},
+                daemon=True,
+            ).start()
+        except Exception as e:
+            logging.getLogger(__name__).warning("Camera low-light setup skipped: %s", e)
+
         # Initialize vision manager only if local vision is requested
         if args.local_vision:
             try:
