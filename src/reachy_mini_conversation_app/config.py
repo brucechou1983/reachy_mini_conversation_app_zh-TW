@@ -207,6 +207,14 @@ class Config:
     # When False, the picture-book / read-along tools are disabled and the robot chats.
     SCREEN_AVAILABLE = detect_screen()
 
+    # Camera low-light: at startup, set the UVC control auto-exposure-priority=1 so
+    # the camera may lengthen exposure (drop framerate) in dim light instead of
+    # staying dark (the official "Image is dark on the Lite version" fix). Applied
+    # via uvc-util (macOS) / v4l2-ctl (Linux); best-effort. Set to 0/false to disable.
+    CAMERA_LOW_LIGHT = os.getenv("REACHY_MINI_CAMERA_LOW_LIGHT", "true").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
     logger.debug(f"Model: {MODEL_NAME}, HF_HOME: {HF_HOME}, Vision Model: {LOCAL_VISION_MODEL}")
 
     REACHY_MINI_CUSTOM_PROFILE = os.getenv("REACHY_MINI_CUSTOM_PROFILE")
